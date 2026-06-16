@@ -41,12 +41,13 @@ class RiskService(NanoService):
         """Inject a model instance for testing or runtime override.
 
         Args:
-            model: A risk-model-like object with a ``predict(principal, term)`` method.
+            model: A risk-model-like object with a ``predict(principal, term)``
+                method.
         """
         self.__model = model
 
     def handle(self, event: Event) -> None:
-        """Score new loans and emit early-warning signals for high-risk borrowers.
+        """Score new loans and emit early-warning signals.
 
         Args:
             event: The incoming event. Only LOAN_ORIGINATED events are processed.
@@ -69,8 +70,7 @@ class RiskService(NanoService):
                     term: float = get_finite(event.payload, "term", 1.0)
                     score: float = self.__model.predict(principal, term)
                 except Exception as exc:
-                    logger.exception("risk scoring failed for %s: %s",
-                                     borrower, exc)
+                    logger.exception("risk scoring failed for %s: %s", borrower, exc)
                     if self.metrics_collector:
                         self.metrics_collector.increment(
                             "risk.scoring.failures",
@@ -90,7 +90,11 @@ class RiskService(NanoService):
                 )
 
     def health_check(self) -> dict[str, Any]:
-        """Risk-specific health: reports model presence."""
+        """Return risk-specific health info.
+
+        Returns:
+            Dict with base health plus model_present flag.
+        """
         return {
             **super().health_check(),
             "model_present": self.__model is not None,

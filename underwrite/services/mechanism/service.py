@@ -1,7 +1,7 @@
-"""The core mechanism service — owns the DelegatedUnderwriting state machine.
+"""The core mechanism service - owns the DelegatedUnderwriting state machine.
 
 This service maintains the authoritative protocol state and processes all
-state-transition commands.  Every other service either queries this state
+state-transition commands. Every other service either queries this state
 (via the shared store) or reacts to the domain events this service emits.
 """
 
@@ -25,12 +25,12 @@ CommandHandler = Callable[[Event], None]
 class MechanismService(NanoService):
     """Maintains the delegation graph and processes all state transitions.
 
-    Listens for service-name events (``mechanism``) carrying a command
+    Listens for service-name events (mechanism) carrying a command
     payload, e.g.::
 
-        {"command": "add_seed", "user": "bank", "base_budget": 100000.0}
+        {'command': 'add_seed', 'user': 'bank', 'base_budget': 100000.0}
 
-    Emits domain events like ``seed.added``, ``user.added``, etc.
+    Emits domain events like seed.added, user.added, etc.
     """
 
     def __init__(self, **kwargs: Any) -> None:
@@ -47,50 +47,73 @@ class MechanismService(NanoService):
         }
         self.__load_store()
 
-    # -- test-accessible hooks -----------------------------------------------
-
     @property
     def loans(self) -> dict[str, list[dict[str, Any]]]:
+        """Return the loan book for testing access."""
         return self.__graph.loans
 
     def credit_limit(self, user: str) -> float:
+        """Return the available credit limit for a user.
+
+        Args:
+            user: The user to query.
+
+        Returns:
+            Available credit limit.
+        """
         return self.__graph.credit_limit(user)
 
     def required_delegation(self, user: str, depth: int = 0) -> float:
-        return self.__graph.required_delegation(user, depth)
+        """Return the minimum delegation a user must receive.
 
-    # -- public property accessors (immutable views) -------------------------
+        Args:
+            user: The user to query.
+            depth: Current recursion depth (prevents infinite loops).
+
+        Returns:
+            Required delegation amount.
+        """
+        return self.__graph.required_delegation(user, depth)
 
     @property
     def seeds(self) -> set[str]:
+        """Return a copy of the seed set."""
         with self.state_lock:
             return set(self.__graph.seeds)
 
     @property
     def earned(self) -> dict[str, float]:
+        """Return a copy of the earned amounts dict."""
         with self.state_lock:
             return dict(self.__graph.earned)
 
     @property
     def principal(self) -> dict[str, float]:
+        """Return a copy of the principal amounts dict."""
         with self.state_lock:
             return dict(self.__graph.principal)
 
-    # -- NanoService interface -----------------------------------------------
-
     def __persist_or_rollback(self, snap: dict[str, Any]) -> None:
-        """Persist state to store; roll back in-memory state on failure."""
+        """Persist state to store; roll back in-memory state on failure.
+
+        Args:
+            snap: Snapshot to restore on persistence failure.
+        """
         with self.state_lock:
             serialized = self.__graph.to_dict()
             try:
                 self.store.set("protocol:state", serialized)
             except Exception:
-                logger.exception(
-                    "failed to persist mechanism state, rolling back")
+                logger.exception("failed to persist mechanism state, rolling back")
                 self.__graph.restore(snap)
                 raise
 
     def handle(self, event: Event) -> None:
+        """Process a mechanism command event.
+
+        Args:
+            event: The incoming command event.
+        """
         command = event.payload.get("command", "")
         handler = self.__command_handlers.get(command)
         if handler is None:
@@ -108,9 +131,8 @@ class MechanismService(NanoService):
                 correlation_id=event.correlation_id,
             )
 
-    # -- command handlers ----------------------------------------------------
-
     def __add_seed(self, event: Event) -> None:
+        """Add a seed participant to the delegation graph."""
         v = PayloadValidator()
         p = event.payload
         user: str = v.non_empty(p, "user")
@@ -122,6 +144,7 @@ class MechanismService(NanoService):
         self.emit(EventType.SEED_ADDED, p, correlation_id=event.correlation_id)
 
     def __add_user(self, event: Event) -> None:
+        """Add a downstream user sponsored by an existing participant."""
         v = PayloadValidator()
         p = event.payload
         sponsor: str = v.non_empty(p, "sponsor")
@@ -134,6 +157,7 @@ class MechanismService(NanoService):
         self.emit(EventType.USER_ADDED, p, correlation_id=event.correlation_id)
 
     def __repay(self, event: Event) -> None:
+        """Apply a repayment and credit the user's earned amount."""
         v = PayloadValidator()
         p = event.payload
         user: str = v.non_empty(p, "user")
@@ -145,6 +169,7 @@ class MechanismService(NanoService):
         self.emit(EventType.REPAID, p, correlation_id=event.correlation_id)
 
     def __originate(self, event: Event) -> None:
+        """Issue a loan to a borrower."""
         v = PayloadValidator()
         p = event.payload
         borrower: str = v.non_empty(p, "borrower")
@@ -163,22 +188,14 @@ class MechanismService(NanoService):
 
         with self.state_lock:
             snap = self.__graph.snapshot()
-            self.__graph.originate(
-                borrower,
-                principal,
-                term,
-                dp,
-                pr,
-                mdr,
-            )
+            self.__graph.originate(borrower, principal, term, dp, pr, mdr)
         protocol_premium = pr * principal * term
         p["protocol_premium"] = protocol_premium
         self.__persist_or_rollback(snap)
-        self.emit(EventType.LOAN_ORIGINATED,
-                  p,
-                  correlation_id=event.correlation_id)
+        self.emit(EventType.LOAN_ORIGINATED, p, correlation_id=event.correlation_id)
 
     def __default(self, event: Event) -> None:
+        """Process a default, propagating the loss up the chain."""
         v = PayloadValidator()
         p = dict(event.payload)
         borrower: str = v.non_empty(p, "borrower")
@@ -187,11 +204,10 @@ class MechanismService(NanoService):
             self.__graph.default(borrower)
             p["principal"] = self.__graph.principal.get(borrower, 0.0)
         self.__persist_or_rollback(snap)
-        self.emit(EventType.DEFAULT_OCCURRED,
-                  p,
-                  correlation_id=event.correlation_id)
+        self.emit(EventType.DEFAULT_OCCURRED, p, correlation_id=event.correlation_id)
 
     def __revoke(self, event: Event) -> None:
+        """Change the delegation amount on a sponsor->child edge."""
         v = PayloadValidator()
         p = event.payload
         sponsor: str = v.non_empty(p, "sponsor")
@@ -204,6 +220,7 @@ class MechanismService(NanoService):
         self.emit(EventType.REVOKED, p, correlation_id=event.correlation_id)
 
     def __quote(self, event: Event) -> None:
+        """Compute a quick quote without modifying state."""
         v = PayloadValidator()
         p = event.payload
         borrower: str = v.non_empty(p, "borrower")
@@ -217,8 +234,7 @@ class MechanismService(NanoService):
         clamped_dp: float = max(min(dp, 1.0 - EPSILON), EPSILON)
         clamped_term: float = max(term, EPSILON)
         one_minus_dp: float = max(1.0 - clamped_dp, EPSILON)
-        break_even: float = min(clamped_dp / (one_minus_dp * clamped_term),
-                                1e6)
+        break_even: float = min(clamped_dp / (one_minus_dp * clamped_term), 1e6)
         protocol_premium: float = pr * principal * term
         self.emit(
             EventType.QUOTE_CALCULATED,
@@ -234,15 +250,9 @@ class MechanismService(NanoService):
             correlation_id=event.correlation_id,
         )
 
-    # -- state persistence ---------------------------------------------------
-
     def __load_store(self) -> None:
+        """Load the delegation graph from the shared store."""
         with self.state_lock:
             raw = self.store.get("protocol:state")
             if raw is not None:
                 self.__graph = DelegationGraph.from_dict(raw)
-
-    def __sync_store(self) -> None:
-        with self.state_lock:
-            state = self.__graph.to_dict()
-            self.store.set("protocol:state", state)

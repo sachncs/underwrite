@@ -1,4 +1,4 @@
-"""Delegation graph queries — read-only access to protocol state."""
+"""Delegation graph queries - read-only access to protocol state."""
 
 from __future__ import annotations
 
@@ -18,23 +18,30 @@ class GraphService(NanoService):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self._handlers: dict[str, Any] = {
+        self.handlers: dict[str, Any] = {
             EventType.GRAPH_PATH: self.__on_graph_path,
             EventType.GRAPH_CREDIT_LIMIT: self.__on_graph_credit_limit,
             EventType.GRAPH_USERS: self.__on_graph_users,
         }
 
     def handle(self, event: Event) -> None:
-        handler = self._handlers.get(event.event_type)
+        """Process graph query events.
+
+        Args:
+            event: The incoming domain event.
+        """
+        handler = self.handlers.get(event.event_type)
         if handler is not None:
             handler(event)
 
     def __on_graph_path(self, event: Event) -> None:
+        """Compute the delegation path from a user to a seed."""
         user: str = event.payload.get("user", "")
         state: dict[str, Any] | None = self.safe_store_get("protocol:state")
         if state is None:
             logger.warning(
-                "graph path query for %s: protocol state not available", user)
+                "graph path query for %s: protocol state not available", user
+            )
             state = {}
         parent: dict[str, str] = state.get("parent", {})
         seeds: list[str] = state.get("seeds", [])
@@ -48,19 +55,23 @@ class GraphService(NanoService):
             current = parent[current]
             path.append(current)
         path.reverse()
-        self.emit(EventType.GRAPH_PATH_RESULT, {
-            "user": user,
-            "path": path
-        },
-                  correlation_id=event.correlation_id)
+        self.emit(
+            EventType.GRAPH_PATH_RESULT,
+            {
+                "user": user,
+                "path": path,
+            },
+            correlation_id=event.correlation_id,
+        )
 
     def __on_graph_credit_limit(self, event: Event) -> None:
+        """Compute the available credit limit for a user."""
         user: str = event.payload.get("user", "")
         state: dict[str, Any] | None = self.safe_store_get("protocol:state")
         if state is None:
             logger.warning(
-                "graph credit-limit query for %s: protocol state not available",
-                user)
+                "graph credit-limit query for %s: protocol state not available", user
+            )
             state = {}
         earned: dict[str, float] = state.get("earned", {})
         base_budget: dict[str, float] = state.get("base_budget", {})
@@ -76,7 +87,8 @@ class GraphService(NanoService):
             budget = delegation_raw.get(edge_key, 0.0) + earned.get(user, 0.0)
         outgoing: float = sum(
             delegation_raw.get(f"{user}->{child}", 0.0)
-            for child in children_raw.get(user, []))
+            for child in children_raw.get(user, [])
+        )
         self.emit(
             EventType.GRAPH_CREDIT_LIMIT_RESULT,
             {
@@ -87,10 +99,13 @@ class GraphService(NanoService):
         )
 
     def __on_graph_users(self, event: Event) -> None:
+        """Return the sorted list of all known users."""
         state: dict[str, Any] | None = self.safe_store_get("protocol:state")
         if state is None:
             state = {}
         earned: dict[str, float] = state.get("earned", {})
-        self.emit(EventType.GRAPH_USERS_RESULT,
-                  {"users": sorted(earned.keys())},
-                  correlation_id=event.correlation_id)
+        self.emit(
+            EventType.GRAPH_USERS_RESULT,
+            {"users": sorted(earned.keys())},
+            correlation_id=event.correlation_id,
+        )

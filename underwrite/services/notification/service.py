@@ -22,26 +22,30 @@ class NotificationService(NanoService):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.__executor: concurrent.futures.ThreadPoolExecutor | None = (
-            concurrent.futures.ThreadPoolExecutor(max_workers=4))
+            concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        )
+        self.handlers: dict[str, Any] = {
+            EventType.FRAUD_ALERT: self.__on_notify_event,
+            EventType.WASH_FLAG: self.__on_notify_event,
+            EventType.VELOCITY_FLAG: self.__on_notify_event,
+            EventType.RISK_EARLY_WARNING: self.__on_notify_event,
+            EventType.NPA_BUCKET_CHANGED: self.__on_notify_event,
+            EventType.DLG_TRIGGERED: self.__on_notify_event,
+        }
 
     def stop(self) -> None:
+        """Shut down the thread pool executor."""
         if self.__executor is not None:
             self.__executor.shutdown(wait=False)
             self.__executor = None
         super().stop()
 
     def handle(self, event: Event) -> None:
-        notify_types = {
-            EventType.FRAUD_ALERT,
-            EventType.WASH_FLAG,
-            EventType.VELOCITY_FLAG,
-            EventType.RISK_EARLY_WARNING,
-            EventType.NPA_BUCKET_CHANGED,
-            EventType.DLG_TRIGGERED,
-        }
-        if event.event_type not in notify_types:
-            return
+        handler = self.handlers.get(event.event_type)
+        if handler is not None:
+            handler(event)
 
+    def __on_notify_event(self, event: Event) -> None:
         if self.__executor is None:
             logger.warning(
                 "notification executor not available, dispatching synchronously"
@@ -59,6 +63,11 @@ class NotificationService(NanoService):
         )
 
     def __dispatch_notification(self, event: Event) -> None:
+        """Dispatch a notification through configured channels.
+
+        Args:
+            event: The event to notify about.
+        """
         try:
             payload = event.payload
             recipient = payload.get("borrower") or payload.get("user") or ""
@@ -66,10 +75,12 @@ class NotificationService(NanoService):
 
             log_data = f"event={event_type} recipient={recipient}"
 
-            email_enabled = os.environ.get("NOTIFICATION_EMAIL_ENABLED",
-                                           "false").lower() == "true"
-            sms_enabled = os.environ.get("NOTIFICATION_SMS_ENABLED",
-                                         "false").lower() == "true"
+            email_enabled = (
+                os.environ.get("NOTIFICATION_EMAIL_ENABLED", "false").lower() == "true"
+            )
+            sms_enabled = (
+                os.environ.get("NOTIFICATION_SMS_ENABLED", "false").lower() == "true"
+            )
 
             if email_enabled:
                 self.__send_email(recipient, event_type, payload)
@@ -81,15 +92,20 @@ class NotificationService(NanoService):
             else:
                 logger.info("notification dispatched: %s", log_data)
         except Exception:
-            logger.exception("failed to dispatch notification for %s",
-                             event.event_id)
+            logger.exception("failed to dispatch notification for %s", event.event_id)
 
-    def __send_email(self, recipient: str, event_type: str,
-                     payload: dict[str, Any]) -> None:
-        """Send an email notification.  Uses SES/SendGrid when configured."""
+    def __send_email(
+        self, recipient: str, event_type: str, payload: dict[str, Any]
+    ) -> None:
+        """Send an email notification via SES or log.
+
+        Args:
+            recipient: Email recipient address.
+            event_type: Type of event triggering the notification.
+            payload: Event payload data.
+        """
         ses_region = os.environ.get("AWS_REGION", "")
-        sender = os.environ.get("NOTIFICATION_EMAIL_SENDER",
-                                "noreply@underwrite.local")
+        sender = os.environ.get("NOTIFICATION_EMAIL_SENDER", "noreply@underwrite.local")
         if ses_region:
             try:
                 import boto3
@@ -99,14 +115,8 @@ class NotificationService(NanoService):
                     Source=sender,
                     Destination={"ToAddresses": [recipient]},
                     Message={
-                        "Subject": {
-                            "Data": f"Underwrite Alert: {event_type}"
-                        },
-                        "Body": {
-                            "Text": {
-                                "Data": str(payload)
-                            }
-                        },
+                        "Subject": {"Data": f"Underwrite Alert: {event_type}"},
+                        "Body": {"Text": {"Data": str(payload)}},
                     },
                 )
             except Exception:
@@ -114,9 +124,16 @@ class NotificationService(NanoService):
         else:
             logger.info("email to %s: [%s] %s", recipient, event_type, payload)
 
-    def __send_sms(self, recipient: str, event_type: str,
-                   payload: dict[str, Any]) -> None:
-        """Send an SMS notification.  Uses Twilio/SNS when configured."""
+    def __send_sms(
+        self, recipient: str, event_type: str, payload: dict[str, Any]
+    ) -> None:
+        """Send an SMS notification via Twilio or log.
+
+        Args:
+            recipient: SMS recipient phone number.
+            event_type: Type of event triggering the notification.
+            payload: Event payload data.
+        """
         account_sid = os.environ.get("TWILIO_ACCOUNT_SID", "")
         auth_token = os.environ.get("TWILIO_AUTH_TOKEN", "")
         from_number = os.environ.get("TWILIO_FROM_NUMBER", "")
@@ -127,7 +144,8 @@ class NotificationService(NanoService):
                 except ImportError:
                     logger.warning(
                         "twilio not installed; install underwrite[notify] "
-                        "or pip install twilio")
+                        "or pip install twilio"
+                    )
                     return
                 client = Client(account_sid, auth_token)
                 client.messages.create(

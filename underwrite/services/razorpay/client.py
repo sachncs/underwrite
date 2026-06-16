@@ -13,8 +13,9 @@ from urllib.parse import urljoin
 
 try:
     import httpx
+
     HAS_HTTPX = True
-except ImportError:  # pragma: no cover
+except ImportError:
     HAS_HTTPX = False
 
 
@@ -126,8 +127,7 @@ class RazorpayClient:
         """
         raise NotImplementedError
 
-    def capture_payment(self, payment_id: str,
-                        amount: int) -> RazorpayPayment:
+    def capture_payment(self, payment_id: str, amount: int) -> RazorpayPayment:
         """Capture an authorized payment.
 
         Args:
@@ -214,8 +214,7 @@ class RazorpayClient:
         """
         raise NotImplementedError
 
-    def verify_webhook(self, payload: bytes, signature: str,
-                       secret: str) -> bool:
+    def verify_webhook(self, payload: bytes, signature: str, secret: str) -> bool:
         """Verify a Razorpay webhook signature.
 
         Args:
@@ -253,47 +252,76 @@ class HttpRazorpayClient(RazorpayClient):
         self.__base_url = api_base_url.rstrip("/")
         self.__timeout = timeout_seconds
 
-    def _request(
+    def request(
         self,
         method: str,
         path: str,
         data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Send an HTTP request to the Razorpay API.
+
+        Args:
+            method: HTTP method.
+            path: API endpoint path.
+            data: Request body data.
+
+        Returns:
+            Parsed JSON response.
+
+        Raises:
+            RazorpayError: On API or transport errors.
+        """
         url = urljoin(self.__base_url + "/", path.lstrip("/"))
         auth = (self.__key_id, self.__key_secret)
         try:
             if not HAS_HTTPX:
                 raise RuntimeError("httpx is required for HttpRazorpayClient")
-            with httpx.Client(auth=auth,
-                              timeout=self.__timeout) as client:
+            with httpx.Client(auth=auth, timeout=self.__timeout) as client:
                 resp = client.request(method, url, json=data)
         except httpx.TimeoutException as exc:
             raise RazorpayError(f"request timed out: {exc}") from exc
         except httpx.RequestError as exc:
             raise RazorpayError(f"request failed: {exc}") from exc
-        return self._handle_response(resp)
+        return self.handle_response(resp)
 
-    def _handle_response(
-        self, resp: httpx.Response) -> dict[str, Any]:
+    def handle_response(self, resp: httpx.Response) -> dict[str, Any]:
+        """Handle the HTTP response and map errors.
+
+        Args:
+            resp: The httpx response.
+
+        Returns:
+            Parsed JSON body.
+
+        Raises:
+            RazorpayAuthError: On 401.
+            RazorpayNotFoundError: On 404.
+            RazorpayValidationError: On 400.
+            RazorpayError: On other errors.
+        """
         try:
             body = resp.json()
         except (json.JSONDecodeError, httpx.DecodingError) as exc:
             raise RazorpayError(
-                f"invalid JSON response ({resp.status_code}): {exc}") from exc
+                f"invalid JSON response ({resp.status_code}): {exc}"
+            ) from exc
         if resp.status_code == 401:
-            raise RazorpayAuthError(body.get("error",
-                                            {}).get("description",
-                                                    "unauthorized"))
+            raise RazorpayAuthError(
+                body.get("error", {}).get("description", "unauthorized")
+            )
         if resp.status_code == 404:
-            raise RazorpayNotFoundError(body.get("error", {}).get(
-                "description", "not found"))
+            raise RazorpayNotFoundError(
+                body.get("error", {}).get("description", "not found")
+            )
         if resp.status_code == 400:
-            raise RazorpayValidationError(body.get("error", {}).get(
-                "description", "validation error"))
+            raise RazorpayValidationError(
+                body.get("error", {}).get("description", "validation error")
+            )
         if not resp.is_success:
             raise RazorpayError(
                 f"API error ({resp.status_code}): "
-                f"{body.get('error', {}).get('description', 'unknown')}")
+                f"{body.get('error', {}).get('description', 'unknown')}"
+            )
         return body
 
     def create_order(
@@ -303,12 +331,27 @@ class HttpRazorpayClient(RazorpayClient):
         receipt: str = "",
         notes: dict[str, str] | None = None,
     ) -> RazorpayOrder:
-        body = self._request("POST", "/orders", {
-            "amount": amount,
-            "currency": currency,
-            "receipt": receipt,
-            "notes": notes or {},
-        })
+        """Create a Razorpay order via the API.
+
+        Args:
+            amount: Amount in paise.
+            currency: ISO currency code.
+            receipt: Unique receipt identifier.
+            notes: Optional notes.
+
+        Returns:
+            The created RazorpayOrder.
+        """
+        body = self.request(
+            "POST",
+            "/orders",
+            {
+                "amount": amount,
+                "currency": currency,
+                "receipt": receipt,
+                "notes": notes or {},
+            },
+        )
         return RazorpayOrder(
             id=body["id"],
             amount=body["amount"],
@@ -320,15 +363,32 @@ class HttpRazorpayClient(RazorpayClient):
             notes=body.get("notes", {}),
         )
 
-    def capture_payment(self, payment_id: str,
-                        amount: int) -> RazorpayPayment:
-        body = self._request("POST", f"/payments/{payment_id}/capture",
-                             {"amount": amount})
-        return self._parse_payment(body)
+    def capture_payment(self, payment_id: str, amount: int) -> RazorpayPayment:
+        """Capture an authorized payment via the API.
+
+        Args:
+            payment_id: Razorpay payment ID.
+            amount: Amount to capture in paise.
+
+        Returns:
+            The captured RazorpayPayment.
+        """
+        body = self.request(
+            "POST", f"/payments/{payment_id}/capture", {"amount": amount}
+        )
+        return self.parse_payment(body)
 
     def fetch_payment(self, payment_id: str) -> RazorpayPayment:
-        body = self._request("GET", f"/payments/{payment_id}")
-        return self._parse_payment(body)
+        """Fetch payment details via the API.
+
+        Args:
+            payment_id: Razorpay payment ID.
+
+        Returns:
+            The RazorpayPayment.
+        """
+        body = self.request("GET", f"/payments/{payment_id}")
+        return self.parse_payment(body)
 
     def create_subscription(
         self,
@@ -339,6 +399,19 @@ class HttpRazorpayClient(RazorpayClient):
         start_at: int | None = None,
         expire_by: int | None = None,
     ) -> RazorpaySubscription:
+        """Create a recurring subscription via the API.
+
+        Args:
+            plan_id: Razorpay plan ID.
+            total_count: Total number of recurring charges.
+            customer_notify: Whether to notify the customer.
+            notes: Optional key-value notes.
+            start_at: Optional start timestamp.
+            expire_by: Optional expiry timestamp.
+
+        Returns:
+            The created RazorpaySubscription.
+        """
         data: dict[str, Any] = {
             "plan_id": plan_id,
             "total_count": total_count,
@@ -349,7 +422,7 @@ class HttpRazorpayClient(RazorpayClient):
             data["start_at"] = start_at
         if expire_by is not None:
             data["expire_by"] = expire_by
-        body = self._request("POST", "/subscriptions", data)
+        body = self.request("POST", "/subscriptions", data)
         return RazorpaySubscription(
             id=body["id"],
             plan_id=body.get("plan_id", ""),
@@ -371,6 +444,18 @@ class HttpRazorpayClient(RazorpayClient):
         customer: dict[str, Any] | None = None,
         notes: dict[str, str] | None = None,
     ) -> RazorpayPaymentLink:
+        """Create a payment link via the API.
+
+        Args:
+            amount: Amount in paise.
+            currency: ISO currency code.
+            description: Payment description.
+            customer: Customer details dict.
+            notes: Optional notes.
+
+        Returns:
+            The created RazorpayPaymentLink.
+        """
         data: dict[str, Any] = {
             "amount": amount,
             "currency": currency,
@@ -379,7 +464,7 @@ class HttpRazorpayClient(RazorpayClient):
         }
         if customer:
             data["customer"] = customer
-        body = self._request("POST", "/payment_links", data)
+        body = self.request("POST", "/payment_links", data)
         return RazorpayPaymentLink(
             id=body["id"],
             short_url=body.get("short_url", ""),
@@ -396,15 +481,34 @@ class HttpRazorpayClient(RazorpayClient):
         amount: int | None = None,
         notes: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        """Refund a payment via the API.
+
+        Args:
+            payment_id: Razorpay payment ID.
+            amount: Amount to refund in paise (None = full).
+            notes: Optional notes.
+
+        Returns:
+            Raw refund response dict.
+        """
         data: dict[str, Any] = {}
         if amount is not None:
             data["amount"] = amount
         if notes:
             data["notes"] = notes
-        return self._request("POST", f"/payments/{payment_id}/refund", data)
+        return self.request("POST", f"/payments/{payment_id}/refund", data)
 
-    def verify_webhook(self, payload: bytes, signature: str,
-                       secret: str) -> bool:
+    def verify_webhook(self, payload: bytes, signature: str, secret: str) -> bool:
+        """Verify a Razorpay webhook signature using HMAC-SHA256.
+
+        Args:
+            payload: Raw request body bytes.
+            signature: Value of the ``X-Razorpay-Signature`` header.
+            secret: Webhook secret.
+
+        Returns:
+            True if the signature is valid.
+        """
         expected = hmac.new(
             secret.encode("utf-8"),
             payload,
@@ -412,7 +516,15 @@ class HttpRazorpayClient(RazorpayClient):
         ).hexdigest()
         return hmac.compare_digest(expected, signature)
 
-    def _parse_payment(self, body: dict[str, Any]) -> RazorpayPayment:
+    def parse_payment(self, body: dict[str, Any]) -> RazorpayPayment:
+        """Parse a payment response dict into a RazorpayPayment.
+
+        Args:
+            body: The JSON response body.
+
+        Returns:
+            A RazorpayPayment instance.
+        """
         return RazorpayPayment(
             id=body["id"],
             order_id=body.get("order_id", ""),
@@ -447,18 +559,36 @@ class MockRazorpayClient(RazorpayClient):
         self.payment_links: dict[str, RazorpayPaymentLink] = {}
         self.refunds: list[dict[str, Any]] = []
         self.fail_on: dict[str, Exception] = {}
-        self._counter: int = 0
+        self.counter: int = 0
 
-    def _next_id(self, prefix: str) -> str:
-        self._counter += 1
-        return f"{prefix}_{self._counter}"
+    def next_id(self, prefix: str) -> str:
+        """Generate a unique test ID with the given prefix.
 
-    def _check_fail(self, action: str) -> None:
+        Args:
+            prefix: The ID prefix.
+
+        Returns:
+            A unique identifier string.
+        """
+        self.counter += 1
+        return f"{prefix}_{self.counter}"
+
+    def check_fail(self, action: str) -> None:
+        """Check if a failure mode is set and raise it.
+
+        Args:
+            action: The action name to check.
+        """
         exc = self.fail_on.get(action)
         if exc is not None:
             raise exc
 
-    def _now(self) -> int:
+    def now(self) -> int:
+        """Return the current Unix timestamp.
+
+        Returns:
+            Current time as integer seconds since epoch.
+        """
         return int(datetime.now(timezone.utc).timestamp())
 
     def create_order(
@@ -468,22 +598,44 @@ class MockRazorpayClient(RazorpayClient):
         receipt: str = "",
         notes: dict[str, str] | None = None,
     ) -> RazorpayOrder:
-        self._check_fail("create_order")
+        """Create a mock Razorpay order.
+
+        Args:
+            amount: Amount in paise.
+            currency: ISO currency code.
+            receipt: Unique receipt identifier.
+            notes: Optional notes.
+
+        Returns:
+            A RazorpayOrder with generated ID.
+        """
+        self.check_fail("create_order")
         order = RazorpayOrder(
-            id=self._next_id("order"),
+            id=self.next_id("order"),
             amount=amount,
             currency=currency,
             receipt=receipt,
             status="created",
-            created_at=self._now(),
+            created_at=self.now(),
             notes=notes or {},
         )
         self.orders[order.id] = order
         return order
 
-    def capture_payment(self, payment_id: str,
-                        amount: int) -> RazorpayPayment:
-        self._check_fail("capture_payment")
+    def capture_payment(self, payment_id: str, amount: int) -> RazorpayPayment:
+        """Capture a mock payment.
+
+        Args:
+            payment_id: Razorpay payment ID.
+            amount: Amount to capture in paise.
+
+        Returns:
+            The captured RazorpayPayment.
+
+        Raises:
+            RazorpayNotFoundError: If payment not found.
+        """
+        self.check_fail("capture_payment")
         payment = self.payments.get(payment_id)
         if payment is None:
             raise RazorpayNotFoundError(f"payment {payment_id} not found")
@@ -492,7 +644,18 @@ class MockRazorpayClient(RazorpayClient):
         return payment
 
     def fetch_payment(self, payment_id: str) -> RazorpayPayment:
-        self._check_fail("fetch_payment")
+        """Fetch a mock payment.
+
+        Args:
+            payment_id: Razorpay payment ID.
+
+        Returns:
+            The RazorpayPayment.
+
+        Raises:
+            RazorpayNotFoundError: If payment not found.
+        """
+        self.check_fail("fetch_payment")
         payment = self.payments.get(payment_id)
         if payment is None:
             raise RazorpayNotFoundError(f"payment {payment_id} not found")
@@ -507,10 +670,23 @@ class MockRazorpayClient(RazorpayClient):
         start_at: int | None = None,
         expire_by: int | None = None,
     ) -> RazorpaySubscription:
-        self._check_fail("create_subscription")
-        now = self._now()
+        """Create a mock subscription.
+
+        Args:
+            plan_id: Razorpay plan ID.
+            total_count: Total number of recurring charges.
+            customer_notify: Whether to notify the customer.
+            notes: Optional notes.
+            start_at: Optional start timestamp.
+            expire_by: Optional expiry timestamp.
+
+        Returns:
+            A RazorpaySubscription with generated ID.
+        """
+        self.check_fail("create_subscription")
+        now = self.now()
         sub = RazorpaySubscription(
-            id=self._next_id("sub"),
+            id=self.next_id("sub"),
             plan_id=plan_id,
             status="created",
             total_count=total_count,
@@ -532,14 +708,26 @@ class MockRazorpayClient(RazorpayClient):
         customer: dict[str, Any] | None = None,
         notes: dict[str, str] | None = None,
     ) -> RazorpayPaymentLink:
-        self._check_fail("create_payment_link")
+        """Create a mock payment link.
+
+        Args:
+            amount: Amount in paise.
+            currency: ISO currency code.
+            description: Payment description.
+            customer: Customer details dict.
+            notes: Optional notes.
+
+        Returns:
+            A RazorpayPaymentLink with generated ID.
+        """
+        self.check_fail("create_payment_link")
         link = RazorpayPaymentLink(
-            id=self._next_id("link"),
-            short_url=f"https://rzp.io/i/{self._next_id('test')}",
+            id=self.next_id("link"),
+            short_url=f"https://rzp.io/i/{self.next_id('test')}",
             amount=amount,
             currency=currency,
             status="created",
-            created_at=self._now(),
+            created_at=self.now(),
             notes=notes or {},
         )
         self.payment_links[link.id] = link
@@ -551,24 +739,46 @@ class MockRazorpayClient(RazorpayClient):
         amount: int | None = None,
         notes: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        self._check_fail("refund_payment")
+        """Refund a mock payment.
+
+        Args:
+            payment_id: Razorpay payment ID.
+            amount: Amount to refund in paise (None = full).
+            notes: Optional notes.
+
+        Returns:
+            Refund response dict.
+
+        Raises:
+            RazorpayNotFoundError: If payment not found.
+        """
+        self.check_fail("refund_payment")
         payment = self.payments.get(payment_id)
         if payment is None:
             raise RazorpayNotFoundError(f"payment {payment_id} not found")
         refund = {
-            "id": self._next_id("rfnd"),
+            "id": self.next_id("rfnd"),
             "payment_id": payment_id,
             "amount": amount or payment.amount,
             "status": "processed",
-            "created_at": self._now(),
+            "created_at": self.now(),
             "notes": notes or {},
         }
         self.refunds.append(refund)
         payment.status = "refunded"
         return refund
 
-    def verify_webhook(self, payload: bytes, signature: str,
-                       secret: str) -> bool:
+    def verify_webhook(self, payload: bytes, signature: str, secret: str) -> bool:
+        """Verify a webhook signature using HMAC-SHA256.
+
+        Args:
+            payload: Raw request body bytes.
+            signature: The signature to verify.
+            secret: Webhook secret.
+
+        Returns:
+            True if the signature is valid.
+        """
         expected = hmac.new(
             secret.encode("utf-8"),
             payload,

@@ -25,24 +25,26 @@ class PaymentService(StatefulService):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self._handlers: dict[str, Any] = {
+        self.handlers: dict[str, Any] = {
             EventType.PAYMENT_RECEIVE: self.__on_payment_receive,
             EventType.PAYMENT_SCHEDULE: self.__on_payment_schedule,
             EventType.PAYMENT_CHECK_OVERDUE: self.__on_payment_check_overdue,
-            EventType.RAZORPAY_PAYMENT_CAPTURED:
-            self.__on_razorpay_payment_captured,
-            EventType.RAZORPAY_SUBSCRIPTION_CHARGED:
-            self.__on_razorpay_subscription_charged,
-            EventType.RAZORPAY_PAYMENT_REFUNDED:
-            self.__on_razorpay_payment_refunded,
+            EventType.RAZORPAY_PAYMENT_CAPTURED: self.__on_razorpay_payment_captured,
+            EventType.RAZORPAY_SUBSCRIPTION_CHARGED: self.__on_razorpay_subscription_charged,
+            EventType.RAZORPAY_PAYMENT_REFUNDED: self.__on_razorpay_payment_refunded,
         }
 
     def handle(self, event: Event) -> None:
-        handler = self._handlers.get(event.event_type)
+        handler = self.handlers.get(event.event_type)
         if handler is not None:
             handler(event)
 
     def __on_payment_receive(self, event: Event) -> None:
+        """Record a payment received.
+
+        Args:
+            event: The PAYMENT_RECEIVE event.
+        """
         loan_id: str = event.payload.get("loan_id", "")
         amount: float = get_finite(event.payload, "amount", 0.0)
         if not loan_id or amount <= 0:
@@ -65,6 +67,11 @@ class PaymentService(StatefulService):
         )
 
     def __on_payment_schedule(self, event: Event) -> None:
+        """Schedule a future payment.
+
+        Args:
+            event: The PAYMENT_SCHEDULE event.
+        """
         loan_id: str = event.payload.get("loan_id", "")
         due_date: str = event.payload.get("due_date", "")
         amount: float = get_finite(event.payload, "amount", 0.0)
@@ -89,6 +96,11 @@ class PaymentService(StatefulService):
         )
 
     def __on_payment_check_overdue(self, event: Event) -> None:
+        """Check for overdue payments and emit overdue events.
+
+        Args:
+            event: The PAYMENT_CHECK_OVERDUE event.
+        """
         loan_id: str = event.payload.get("loan_id", "")
         if not loan_id:
             return
@@ -114,20 +126,26 @@ class PaymentService(StatefulService):
                         correlation_id=event.correlation_id,
                     )
 
-    # -- Razorpay bridging ---------------------------------------------------
-
     def __on_razorpay_payment_captured(self, event: Event) -> None:
+        """Bridge a Razorpay payment captured event to PAYMENT_RECEIVED.
+
+        Args:
+            event: The RAZORPAY_PAYMENT_CAPTURED event.
+        """
         loan_id: str = event.payload.get("loan_id", "")
         amount: float = get_finite(event.payload, "amount", 0.0)
         razorpay_payment_id: str = event.payload.get("payment_id", "")
         if not loan_id or amount <= 0:
             return
-        self.store.set(f"razorpay_payment:{razorpay_payment_id}", {
-            "loan_id": loan_id,
-            "amount": amount,
-            "status": "captured",
-            "received_at": datetime.now(timezone.utc).isoformat(),
-        })
+        self.store.set(
+            f"razorpay_payment:{razorpay_payment_id}",
+            {
+                "loan_id": loan_id,
+                "amount": amount,
+                "status": "captured",
+                "received_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
         self.emit(
             EventType.PAYMENT_RECEIVED,
             {
@@ -140,19 +158,27 @@ class PaymentService(StatefulService):
         )
 
     def __on_razorpay_subscription_charged(self, event: Event) -> None:
+        """Bridge a Razorpay subscription charge event to PAYMENT_RECEIVED.
+
+        Args:
+            event: The RAZORPAY_SUBSCRIPTION_CHARGED event.
+        """
         loan_id: str = event.payload.get("loan_id", "")
         amount: float = get_finite(event.payload, "amount", 0.0)
         sub_id: str = event.payload.get("subscription_id", "")
         payment_id: str = event.payload.get("payment_id", "")
         if not loan_id or amount <= 0:
             return
-        self.store.set(f"razorpay_subscription:{payment_id}", {
-            "loan_id": loan_id,
-            "subscription_id": sub_id,
-            "amount": amount,
-            "status": "charged",
-            "received_at": datetime.now(timezone.utc).isoformat(),
-        })
+        self.store.set(
+            f"razorpay_subscription:{payment_id}",
+            {
+                "loan_id": loan_id,
+                "subscription_id": sub_id,
+                "amount": amount,
+                "status": "charged",
+                "received_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
         self.emit(
             EventType.PAYMENT_RECEIVED,
             {
@@ -166,16 +192,28 @@ class PaymentService(StatefulService):
         )
 
     def __on_razorpay_payment_refunded(self, event: Event) -> None:
+        """Record a Razorpay payment refund.
+
+        Args:
+            event: The RAZORPAY_PAYMENT_REFUNDED event.
+        """
         loan_id: str = event.payload.get("loan_id", "")
         amount: float = get_finite(event.payload, "amount", 0.0)
         razorpay_payment_id: str = event.payload.get("payment_id", "")
         if not loan_id or amount <= 0:
             return
-        self.store.set(f"razorpay_refund:{razorpay_payment_id}", {
-            "loan_id": loan_id,
-            "amount": amount,
-            "status": "refunded",
-            "refunded_at": datetime.now(timezone.utc).isoformat(),
-        })
-        logger.info("razorpay payment %s refunded for loan %s: %.2f",
-                     razorpay_payment_id, loan_id, amount)
+        self.store.set(
+            f"razorpay_refund:{razorpay_payment_id}",
+            {
+                "loan_id": loan_id,
+                "amount": amount,
+                "status": "refunded",
+                "refunded_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        logger.info(
+            "razorpay payment %s refunded for loan %s: %.2f",
+            razorpay_payment_id,
+            loan_id,
+            amount,
+        )

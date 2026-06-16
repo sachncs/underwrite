@@ -41,8 +41,7 @@ class StrategyRegistry:
         self.__strategies: dict[str, type[RiskScoringStrategy]] = {}
         self.__lock: threading.Lock = threading.Lock()
 
-    def register(self, name: str,
-                 strategy_cls: type[RiskScoringStrategy]) -> None:
+    def register(self, name: str, strategy_cls: type[RiskScoringStrategy]) -> None:
         """Register a strategy class under *name*.
 
         Args:
@@ -50,39 +49,53 @@ class StrategyRegistry:
             strategy_cls: A concrete ``RiskScoringStrategy`` subclass.
 
         Raises:
-            TypeError: If *strategy_cls* is not a ``RiskScoringStrategy`` subclass.
+            TypeError: If *strategy_cls* is not a ``RiskScoringStrategy``
+                subclass.
         """
-        if not (isinstance(strategy_cls, type)
-                and issubclass(strategy_cls, RiskScoringStrategy)):
-            raise TypeError(
-                f"{strategy_cls} is not a RiskScoringStrategy subclass")
+        if not (
+            isinstance(strategy_cls, type)
+            and issubclass(strategy_cls, RiskScoringStrategy)
+        ):
+            raise TypeError(f"{strategy_cls} is not a RiskScoringStrategy subclass")
         with self.__lock:
             self.__strategies[name] = strategy_cls
 
     def get(self, name: str) -> type[RiskScoringStrategy] | None:
-        """Return the strategy registered under *name*, or ``None``."""
+        """Return the strategy registered under *name*, or ``None``.
+
+        Args:
+            name: The strategy name to look up.
+
+        Returns:
+            The registered strategy class, or None.
+        """
         with self.__lock:
             return self.__strategies.get(name)
 
 
-# Module-level singleton for backward compatibility.
-_strategy_registry: StrategyRegistry = StrategyRegistry()
+_module_strategy_registry: StrategyRegistry = StrategyRegistry()
 
 
-def register_strategy(name: str,
-                      strategy_cls: type[RiskScoringStrategy]) -> None:
+def register_strategy(name: str, strategy_cls: type[RiskScoringStrategy]) -> None:
     """Register a risk-scoring strategy class by name for plugin-like discovery.
 
     Args:
         name: Short name (e.g. ``"xgboost"``, ``"linear"``).
         strategy_cls: A concrete ``RiskScoringStrategy`` subclass.
     """
-    _strategy_registry.register(name, strategy_cls)
+    _module_strategy_registry.register(name, strategy_cls)
 
 
 def get_strategy(name: str) -> type[RiskScoringStrategy] | None:
-    """Return a previously registered strategy class, or ``None``."""
-    return _strategy_registry.get(name)
+    """Return a previously registered strategy class, or ``None``.
+
+    Args:
+        name: The strategy name to look up.
+
+    Returns:
+        The registered strategy class, or None.
+    """
+    return _module_strategy_registry.get(name)
 
 
 # -- Strategy pattern ---------------------------------------------------------
@@ -96,8 +109,7 @@ class RiskScoringStrategy(ABC):
     """
 
     @abstractmethod
-    def predict(self, principal: float, term: float) -> float:
-        ...
+    def predict(self, principal: float, term: float) -> float: ...
 
 
 # -- Concrete strategies ------------------------------------------------------
@@ -107,6 +119,15 @@ class HeuristicStrategy(RiskScoringStrategy):
     """Heuristic fallback based on principal-to-term ratio."""
 
     def predict(self, principal: float, term: float) -> float:
+        """Compute a heuristic default-probability score.
+
+        Args:
+            principal: Loan principal amount.
+            term: Loan term.
+
+        Returns:
+            A score in [0.01, 0.5].
+        """
         safe_term: float = max(term, 1.0)
         if principal <= 0:
             return 0.0
@@ -122,8 +143,16 @@ class JsonModelStrategy(RiskScoringStrategy):
         self.__intercept: float = params.get("intercept_", 0.0)
 
     def predict(self, principal: float, term: float) -> float:
-        score = principal * self.__coef[0] + term * self.__coef[
-            1] + self.__intercept
+        """Predict using a linear model from JSON parameters.
+
+        Args:
+            principal: Loan principal amount.
+            term: Loan term.
+
+        Returns:
+            A score in [0.0, 1.0].
+        """
+        score = principal * self.__coef[0] + term * self.__coef[1] + self.__intercept
         return min(max(score, 0.0), 1.0)
 
 
@@ -134,6 +163,15 @@ class JoblibModelStrategy(RiskScoringStrategy):
         self.__model = model
 
     def predict(self, principal: float, term: float) -> float:
+        """Predict using a joblib-loaded sklearn model.
+
+        Args:
+            principal: Loan principal amount.
+            term: Loan term.
+
+        Returns:
+            The model's prediction as a float.
+        """
         result = self.__model.predict([[principal, term]])
         return float(result[0])
 
@@ -147,9 +185,6 @@ class RiskModel:
     Accepts either a pre-built ``RiskScoringStrategy`` instance or a
     model file path (joblib / JSON).  When neither is provided, falls
     back to ``HeuristicStrategy``.
-
-    The model must expose a ``predict(X)`` method that accepts a list
-    of feature vectors and returns a list of predictions.
     """
 
     def __init__(
@@ -179,16 +214,25 @@ class RiskModel:
 
     @staticmethod
     def __verify_integrity(model_path: str) -> None:
-        import os
+        """Verify model file integrity using SHA-256.
 
-        expected = os.environ.get("RISK_MODEL_SHA256", "")
+        Args:
+            model_path: Path to the model file.
+
+        Raises:
+            ValueError: If integrity check fails.
+        """
+        import os as _os
+
+        expected = _os.environ.get("RISK_MODEL_SHA256", "")
         sidecar = Path(f"{model_path}.sha256")
         if not expected and sidecar.exists():
             expected = sidecar.read_text().strip()
         if not expected:
             raise ValueError(
                 "Model integrity check requires either RISK_MODEL_SHA256 "
-                f"environment variable or a {model_path}.sha256 sidecar file")
+                f"environment variable or a {model_path}.sha256 sidecar file"
+            )
         with open(model_path, "rb") as f:
             actual = hashlib.sha256(f.read()).hexdigest()
         if actual != expected:
@@ -197,15 +241,24 @@ class RiskModel:
             )
 
     def predict(self, principal: float, term: float) -> float:
-        """Returns a default-probability score in [0.0, 1.0]."""
+        """Return a default-probability score in [0.0, 1.0].
+
+        Args:
+            principal: Loan principal amount.
+            term: Loan term.
+
+        Returns:
+            A default-probability score.
+        """
         import math as math_mod
 
         if not math_mod.isfinite(principal) or not math_mod.isfinite(term):
             logger.warning(
                 "non-finite inputs to risk model: principal=%r, term=%r",
-                principal, term)
-            principal = max(principal,
-                            0.0) if math_mod.isfinite(principal) else 0.0
+                principal,
+                term,
+            )
+            principal = max(principal, 0.0) if math_mod.isfinite(principal) else 0.0
             term = max(term, 1.0) if math_mod.isfinite(term) else 1.0
         try:
             return self.__strategy.predict(principal, term)
@@ -245,18 +298,15 @@ class RiskModel:
             except ImportError:
                 logger.info("joblib not available, falling back to JSON load")
             except Exception as exc:
-                logger.exception("joblib load failed for %s: %s", model_path,
-                                 exc)
+                logger.exception("joblib load failed for %s: %s", model_path, exc)
         else:
-            logger.info(
-                "joblib disabled; set UNDERWRITE_ALLOW_JOBLIB=true to enable")
+            logger.info("joblib disabled; set UNDERWRITE_ALLOW_JOBLIB=true to enable")
 
         try:
             with open(model_path) as fh:
                 params = json.load(fh)
         except (json.JSONDecodeError, OSError) as exc:
-            raise ValueError(
-                f"Failed to parse model file {model_path}: {exc}") from exc
+            raise ValueError(f"Failed to parse model file {model_path}: {exc}") from exc
 
         if not isinstance(params, dict):
             raise ValueError(

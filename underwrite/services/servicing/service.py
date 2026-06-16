@@ -37,117 +37,148 @@ class ServicingService(NanoService):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.__lock: threading.RLock = threading.RLock()
+        self.handlers: dict[str, Any] = {
+            EventType.LOAN_ORIGINATED: self.__on_loan_originated,
+            EventType.REPAID: self.__on_repaid,
+            EventType.DEFAULT_OCCURRED: self.__on_default_occurred,
+            EventType.RAZORPAY_ORDER_CREATED: self.__on_razorpay_order_created,
+            EventType.RAZORPAY_MANDATE_ACTIVE: self.__on_mandate_active,
+            EventType.RAZORPAY_MANDATE_INACTIVE: self.__on_mandate_inactive,
+        }
 
     def handle(self, event: Event) -> None:
-        if event.event_type == EventType.LOAN_ORIGINATED:
-            loan_id: str = event.payload.get("loan_id", "")
-            borrower: str = event.payload.get("borrower", "")
-            principal: float = get_finite(event.payload, "principal", 0.0)
-            annual_rate: float = get_finite(event.payload, "annual_rate", 0.0)
-            if not loan_id:
-                logger.warning("dropping LOAN_ORIGINATED with missing loan_id")
-                return
-            now = datetime.now(timezone.utc)
-            self.store.set(
-                f"loan:{loan_id}",
-                {
-                    "borrower": borrower,
-                    "principal": principal,
-                    "outstanding": principal,
-                    "annual_rate": annual_rate,
-                    "daily_rate": annual_rate / 36500.0,
-                    "last_interest_date": now.isoformat(),
-                    "origin_date": now.isoformat(),
-                    "status": "active",
-                    "originated_at": now.isoformat(),
-                },
-            )
+        handler = self.handlers.get(event.event_type)
+        if handler is not None:
+            handler(event)
 
-        elif event.event_type == EventType.REPAID:
-            loan_id = event.payload.get("loan_id", "")
-            if not loan_id:
-                logger.warning("dropping REPAID with missing loan_id")
-                return
-            amount: float = get_finite(event.payload, "amount", 0.0)
-            if self.bus.idempotency.is_duplicate(self.service_id,
-                                                 event.event_id):
-                logger.debug("duplicate REPAID event %s dropped",
-                             event.event_id)
-                return
-            with self.__lock:
-                record = self.store.get(f"loan:{loan_id}")
-                if record:
-                    accrued = self.__accrue_interest(record)
-                    # Apply payment: first to accrued interest, then principal
-                    remaining = amount
-                    if accrued > 0 and remaining > 0:
-                        if remaining >= accrued:
-                            remaining -= accrued
-                            record["accrued_interest"] = 0.0
-                        else:
-                            record["accrued_interest"] = accrued - remaining
-                            remaining = 0.0
-                    if remaining > 0:
-                        record["outstanding"] = max(
-                            0.0, record["outstanding"] - remaining)
-                    record["last_interest_date"] = datetime.now(
-                        timezone.utc).isoformat()
-                    if record["outstanding"] <= 0:
-                        record["status"] = "paid"
-                        record["paid_at"] = datetime.now(
-                            timezone.utc).isoformat()
-                    self.store.set(f"loan:{loan_id}", record)
+    def __on_loan_originated(self, event: Event) -> None:
+        """Create a loan record when a loan is originated.
 
-        elif event.event_type == EventType.DEFAULT_OCCURRED:
-            loan_id = event.payload.get("loan_id", "")
-            if not loan_id:
-                logger.warning(
-                    "dropping DEFAULT_OCCURRED with missing loan_id")
-                return
-            with self.__lock:
-                record = self.store.get(f"loan:{loan_id}")
-                if record:
-                    record["status"] = "defaulted"
-                    record["last_interest_date"] = datetime.now(
-                        timezone.utc).isoformat()
-                    record["defaulted_at"] = datetime.now(
-                        timezone.utc).isoformat()
-                    self.store.set(f"loan:{loan_id}", record)
+        Args:
+            event: The LOAN_ORIGINATED event.
+        """
+        loan_id: str = event.payload.get("loan_id", "")
+        borrower: str = event.payload.get("borrower", "")
+        principal: float = get_finite(event.payload, "principal", 0.0)
+        annual_rate: float = get_finite(event.payload, "annual_rate", 0.0)
+        if not loan_id:
+            logger.warning("dropping LOAN_ORIGINATED with missing loan_id")
+            return
+        now = datetime.now(timezone.utc)
+        self.store.set(
+            f"loan:{loan_id}",
+            {
+                "borrower": borrower,
+                "principal": principal,
+                "outstanding": principal,
+                "annual_rate": annual_rate,
+                "daily_rate": annual_rate / 36500.0,
+                "last_interest_date": now.isoformat(),
+                "origin_date": now.isoformat(),
+                "status": "active",
+                "originated_at": now.isoformat(),
+            },
+        )
 
-        elif event.event_type == EventType.RAZORPAY_ORDER_CREATED:
-            loan_id = event.payload.get("loan_id", "")
-            order_id = event.payload.get("order_id", "")
-            if not loan_id or not order_id:
-                return
-            with self.__lock:
-                record = self.store.get(f"loan:{loan_id}")
-                if record:
-                    record["razorpay_order_id"] = order_id
-                    self.store.set(f"loan:{loan_id}", record)
+    def __on_repaid(self, event: Event) -> None:
+        """Apply a repayment to a loan record.
 
-        elif event.event_type == EventType.RAZORPAY_MANDATE_ACTIVE:
-            loan_id = event.payload.get("loan_id", "")
-            subscription_id = event.payload.get("subscription_id", "")
-            if not loan_id:
-                return
-            with self.__lock:
-                record = self.store.get(f"loan:{loan_id}")
-                if record:
-                    record["razorpay_subscription_id"] = subscription_id
-                    record["razorpay_mandate_status"] = "active"
-                    self.store.set(f"loan:{loan_id}", record)
+        Args:
+            event: The REPAID event.
+        """
+        loan_id = event.payload.get("loan_id", "")
+        if not loan_id:
+            logger.warning("dropping REPAID with missing loan_id")
+            return
+        amount: float = get_finite(event.payload, "amount", 0.0)
+        if self.bus.idempotency.is_duplicate(self.service_id, event.event_id):
+            logger.debug("duplicate REPAID event %s dropped", event.event_id)
+            return
+        with self.__lock:
+            record = self.store.get(f"loan:{loan_id}")
+            if record:
+                accrued = self.__accrue_interest(record)
+                remaining = amount
+                if accrued > 0 and remaining > 0:
+                    if remaining >= accrued:
+                        remaining -= accrued
+                        record["accrued_interest"] = 0.0
+                    else:
+                        record["accrued_interest"] = accrued - remaining
+                        remaining = 0.0
+                if remaining > 0:
+                    record["outstanding"] = max(0.0, record["outstanding"] - remaining)
+                record["last_interest_date"] = datetime.now(timezone.utc).isoformat()
+                if record["outstanding"] <= 0:
+                    record["status"] = "paid"
+                    record["paid_at"] = datetime.now(timezone.utc).isoformat()
+                self.store.set(f"loan:{loan_id}", record)
 
-        elif event.event_type == EventType.RAZORPAY_MANDATE_INACTIVE:
-            loan_id = event.payload.get("loan_id", "")
-            if not loan_id:
-                return
-            with self.__lock:
-                record = self.store.get(f"loan:{loan_id}")
-                if record:
-                    record["razorpay_mandate_status"] = "inactive"
-                    self.store.set(f"loan:{loan_id}", record)
+    def __on_default_occurred(self, event: Event) -> None:
+        """Mark a loan as defaulted.
 
-    # -- interest accrual ----------------------------------------------------
+        Args:
+            event: The DEFAULT_OCCURRED event.
+        """
+        loan_id = event.payload.get("loan_id", "")
+        if not loan_id:
+            logger.warning("dropping DEFAULT_OCCURRED with missing loan_id")
+            return
+        with self.__lock:
+            record = self.store.get(f"loan:{loan_id}")
+            if record:
+                record["status"] = "defaulted"
+                record["last_interest_date"] = datetime.now(timezone.utc).isoformat()
+                record["defaulted_at"] = datetime.now(timezone.utc).isoformat()
+                self.store.set(f"loan:{loan_id}", record)
+
+    def __on_razorpay_order_created(self, event: Event) -> None:
+        """Associate a Razorpay order ID with a loan.
+
+        Args:
+            event: The RAZORPAY_ORDER_CREATED event.
+        """
+        loan_id = event.payload.get("loan_id", "")
+        order_id = event.payload.get("order_id", "")
+        if not loan_id or not order_id:
+            return
+        with self.__lock:
+            record = self.store.get(f"loan:{loan_id}")
+            if record:
+                record["razorpay_order_id"] = order_id
+                self.store.set(f"loan:{loan_id}", record)
+
+    def __on_mandate_active(self, event: Event) -> None:
+        """Record an active Razorpay mandate for a loan.
+
+        Args:
+            event: The RAZORPAY_MANDATE_ACTIVE event.
+        """
+        loan_id = event.payload.get("loan_id", "")
+        subscription_id = event.payload.get("subscription_id", "")
+        if not loan_id:
+            return
+        with self.__lock:
+            record = self.store.get(f"loan:{loan_id}")
+            if record:
+                record["razorpay_subscription_id"] = subscription_id
+                record["razorpay_mandate_status"] = "active"
+                self.store.set(f"loan:{loan_id}", record)
+
+    def __on_mandate_inactive(self, event: Event) -> None:
+        """Record an inactive Razorpay mandate for a loan.
+
+        Args:
+            event: The RAZORPAY_MANDATE_INACTIVE event.
+        """
+        loan_id = event.payload.get("loan_id", "")
+        if not loan_id:
+            return
+        with self.__lock:
+            record = self.store.get(f"loan:{loan_id}")
+            if record:
+                record["razorpay_mandate_status"] = "inactive"
+                self.store.set(f"loan:{loan_id}", record)
 
     def accrue_interest(self, loan_id: str) -> float:
         """Manually trigger interest accrual for a loan.

@@ -30,6 +30,52 @@ from underwrite.validate import get_finite, get_non_empty
 DEFAULT_COOLING_OFF_DAYS = 3
 
 
+def compute_apr(
+    principal: float, emi: Decimal, tenure_months: int, total_fees: Decimal
+) -> Decimal:
+    """Compute the Annual Percentage Rate (APR) including fees.
+
+    Uses the Newton-Raphson method to solve for the effective monthly
+    rate that equates the loan amount (principal - fees) to the present
+    value of all EMI payments.
+
+    Args:
+        principal: Loan principal.
+        emi: Monthly EMI amount.
+        tenure_months: Number of monthly payments.
+        total_fees: Total upfront fees deducted from principal.
+
+    Returns:
+        APR as a Decimal percentage (e.g. 13.5 for 13.5%).
+    """
+    net_principal = Decimal(str(principal)) - total_fees
+    emi_dec = emi
+    n = tenure_months
+
+    if net_principal <= 0 or emi_dec <= 0 or n <= 0:
+        return Decimal("0")
+
+    rate = Decimal("0.01")
+    for _ in range(100):
+        factor = (Decimal("1") + rate) ** n
+        pv = emi_dec * (factor - Decimal("1")) / (rate * factor)
+        diff = pv - net_principal
+        if abs(diff) < Decimal("0.0001"):
+            break
+        derivative = (
+            emi_dec
+            * ((Decimal("1") + rate) ** n * (Decimal("1") - n * rate) - Decimal("1"))
+            / (rate * rate * factor)
+        )
+        if derivative == 0:
+            break
+        rate -= diff / derivative
+        if rate <= 0:
+            rate = Decimal("0.0001")
+
+    return rate * Decimal("1200")
+
+
 class KfsService(NanoService):
     """Generates Key Fact Statements for loan products.
 
@@ -40,14 +86,21 @@ class KfsService(NanoService):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self.__cooling_off_days: int = kwargs.get("cooling_off_days",
-                                                  DEFAULT_COOLING_OFF_DAYS)
+        self.__cooling_off_days: int = kwargs.get(
+            "cooling_off_days", DEFAULT_COOLING_OFF_DAYS
+        )
 
     def handle(self, event: Event) -> None:
+        """Generate a KFS document on request.
+
+        Args:
+            event: The incoming domain event.
+        """
         if event.event_type == EventType.KFS_GENERATE:
             self.__on_kfs_generate(event)
 
     def __on_kfs_generate(self, event: Event) -> None:
+        """Handle a KFS generation request."""
         p = event.payload
         loan_id: str = p.get("loan_id", "")
         if not loan_id:
@@ -69,17 +122,19 @@ class KfsService(NanoService):
                 sd = None
 
         try:
-            sched = generate_schedule(Decimal(str(principal)),
-                                      Decimal(str(annual_rate)),
-                                      tenure_months,
-                                      start_date=sd)
+            sched = generate_schedule(
+                Decimal(str(principal)),
+                Decimal(str(annual_rate)),
+                tenure_months,
+                start_date=sd,
+            )
         except Exception as exc:
-            logger.error("KFS schedule generation failed for loan %s: %s",
-                         loan_id, exc)
+            logger.error("KFS schedule generation failed for loan %s: %s", loan_id, exc)
             return
 
-        kfs = self.__build_kfs(loan_id, borrower, principal, annual_rate,
-                               tenure_months, sched, fees, sd)
+        kfs = self.__build_kfs(
+            loan_id, borrower, principal, annual_rate, tenure_months, sched, fees, sd
+        )
         self.emit(
             EventType.KFS_GENERATED,
             kfs,
@@ -113,8 +168,7 @@ class KfsService(NanoService):
             KFS document as a dict.
         """
         total_fees = sum(f.get("amount", 0.0) for f in fees)
-        apr = self.__compute_apr(principal, sched.emi, tenure_months,
-                                 Decimal(str(total_fees)))
+        apr = compute_apr(principal, sched.emi, tenure_months, Decimal(str(total_fees)))
         generated_at = datetime.now(timezone.utc).isoformat()
 
         kfs: dict[str, Any] = {
@@ -135,49 +189,3 @@ class KfsService(NanoService):
         if start_date:
             kfs["start_date"] = start_date.isoformat()
         return kfs
-
-    def __compute_apr(self, principal: float, emi: Decimal, tenure_months: int,
-                      total_fees: Decimal) -> Decimal:
-        """Compute the Annual Percentage Rate (APR) including fees.
-
-        Uses the Newton-Raphson method to solve for the effective
-        monthly rate that equates the loan amount (principal - fees)
-        to the present value of all EMI payments.
-
-        Args:
-            principal: Loan principal.
-            emi: Monthly EMI amount.
-            tenure_months: Number of monthly payments.
-            total_fees: Total upfront fees deducted from principal.
-
-        Returns:
-            APR as a Decimal percentage (e.g. 13.5 for 13.5%).
-        """
-        net_principal = Decimal(str(principal)) - total_fees
-        if net_principal <= 0:
-            return Decimal("0")
-
-        emi_dec = emi
-        n = tenure_months
-
-        if emi_dec <= 0 or n <= 0:
-            return Decimal("0")
-
-        rate = Decimal("0.01")  # initial guess (1% monthly)
-        for _ in range(100):
-            factor = (Decimal("1") + rate)**n
-            pv = emi_dec * (factor - Decimal("1")) / (rate * factor)
-            diff = pv - net_principal
-            if abs(diff) < Decimal("0.0001"):
-                break
-            derivative = emi_dec * ((Decimal("1") + rate)**n *
-                                    (Decimal("1") - n * rate) -
-                                    Decimal("1")) / (rate * rate * factor)
-            if derivative == 0:
-                break
-            rate -= diff / derivative
-            if rate <= 0:
-                rate = Decimal("0.0001")
-
-        apr = rate * Decimal("1200")
-        return apr

@@ -1,12 +1,12 @@
 """Abstract base class for every nano service.
 
 Each service:
-  - Has a unique ``service_id``
-  - Owns an Ed25519 ``Identity`` for signing its emitted events
-  - Subscribes to events on a shared ``EventBus``
-  - Persists state through a ``Store``
-  - Implements ``handle(event) -> None`` to process incoming events
-  - Emits events via ``emit(event_type, payload)`` which auto-signs
+  - Has a unique service_id
+  - Owns an Ed25519 Identity for signing its emitted events
+  - Subscribes to events on a shared EventBus
+  - Persists state through a Store
+  - Implements handle(event) -> None to process incoming events
+  - Emits events via emit(event_type, payload) which auto-signs
   - Tracks handler duration via distributed tracing
   - Supports saga orchestration for multi-step transactions
   - Guards against duplicate event processing via idempotency
@@ -23,7 +23,10 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from underwrite.services.persistence import BatchedStoreRepository, TypedStoreRepository
+    from underwrite.services.persistence import (
+        BatchedStoreRepository,
+        TypedStoreRepository,
+    )
 
 from underwrite.__authz__ import AccessControl, AuthzError
 from underwrite.__bus__ import EventBus, LocalBus
@@ -42,16 +45,21 @@ log_context = threading.local()
 
 
 def get_log_correlation_id() -> str:
-    """Returns the correlation_id for the current thread, or empty string."""
+    """Return the correlation_id for the current thread, or empty string.
+
+    Returns:
+        The correlation ID string from thread-local storage, or '' if
+        not set.
+    """
     return getattr(log_context, "correlation_id", "")
 
 
 class NanoService(ABC):
     """Base class that all nano services extend.
 
-    Provides event emission/subscription, identity-based signing,
-    state persistence, distributed tracing, saga orchestration,
-    idempotency, metrics collection, health checks, and authz gating.
+    Provides event emission/subscription, identity-based signing, state
+    persistence, distributed tracing, saga orchestration, idempotency,
+    metrics collection, health checks, and authz gating.
     """
 
     def __init__(
@@ -68,7 +76,7 @@ class NanoService(ABC):
         supervisor: ServiceSupervisor | None = None,
         max_concurrent: int = 0,
     ) -> None:
-        """Initialise the nano service.
+        """Initialize the nano service.
 
         Args:
             service_id: Unique identifier for this service instance.
@@ -77,9 +85,12 @@ class NanoService(ABC):
             store: State persistence backend. Uses MemoryStore if omitted.
             metrics: Optional metrics collector for instrumentation.
             health: Optional health registry for liveness checks.
-            authz: Optional access control for authz gating.
+            authz: Optional access control for authorization gating.
             tracer: Optional distributed tracer for handler timing.
-            max_concurrent: Max concurrent handler threads (0 = synchronous).
+            saga: Optional saga orchestrator for multi-step transactions.
+            supervisor: Optional supervisor for lifecycle management.
+            max_concurrent: Max concurrent handler threads
+                (0 = synchronous).
         """
         self.__service_id: str = service_id
         self.__identity: Identity = identity or Identity.create(service_id)
@@ -99,8 +110,10 @@ class NanoService(ABC):
         self.__last_event_time: float = 0.0
         self.__state_lock: threading.RLock = threading.RLock()
         self.__executor: concurrent.futures.ThreadPoolExecutor | None = (
-            concurrent.futures.ThreadPoolExecutor(
-                max_workers=max_concurrent) if max_concurrent > 0 else None)
+            concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent)
+            if max_concurrent > 0
+            else None
+        )
 
         self.__validator: PayloadValidator = PayloadValidator()
 
@@ -143,25 +156,27 @@ class NanoService(ABC):
         return self.__validator
 
     def safe_store_get(self, key: str, default: Any = None) -> Any | None:
-        """Get a value from the store, logging and returning *default* on failure.
+        """Get a value from the store, returning default on failure.
 
         Args:
             key: Store key to retrieve.
-            default: Value returned when the key is missing or the read fails.
+            default: Value returned when the key is missing or the read
+                fails.
 
         Returns:
-            The stored value, *default* if the key is missing, or *default*
-            if the read raises an exception.
+            The stored value, or *default* if the key is missing or an
+            exception occurs.
         """
         try:
             return self.__store.get(key)
         except Exception:
-            logger.exception("store get failed for %s in service %s", key,
-                             self.__service_id)
+            logger.exception(
+                "store get failed for %s in service %s", key, self.__service_id
+            )
             return default
 
     def safe_store_set(self, key: str, value: Any) -> bool:
-        """Write a value to the store, logging and returning False on failure.
+        """Write a value to the store, returning False on failure.
 
         Args:
             key: Store key for the value.
@@ -174,26 +189,33 @@ class NanoService(ABC):
             self.__store.set(key, value)
             return True
         except Exception:
-            logger.exception("store set failed for %s in service %s", key,
-                             self.__service_id)
+            logger.exception(
+                "store set failed for %s in service %s", key, self.__service_id
+            )
             return False
 
     def subscribe(self, event_type: str) -> None:
-        """Registers this service to receive *event_type* events."""
+        """Register this service to receive event_type events.
+
+        Args:
+            event_type: The event type string to subscribe to.
+        """
         if self.__authz and not self.__authz.check_subscribe(
-                self.__service_id, event_type):
-            logger.warning("%s not authorized to subscribe to %s",
-                           self.__service_id, event_type)
+            self.__service_id, event_type
+        ):
+            logger.warning(
+                "%s not authorized to subscribe to %s", self.__service_id, event_type
+            )
             return
         sid: str = self.__bus.subscribe(event_type, self.__dispatch)
         self.__subscriptions.append(sid)
 
     def start(self) -> None:
-        """Starts event processing for this service."""
+        """Start event processing for this service."""
         self.__running = True
 
     def stop(self) -> None:
-        """Stops event processing, shuts down executor, and unsubscribes."""
+        """Stop event processing, shut down executor, and unsubscribe."""
         self.__running = False
         if self.__executor is not None:
             self.__executor.shutdown(wait=False)
@@ -202,11 +224,22 @@ class NanoService(ABC):
             self.__bus.unsubscribe(sid)
         self.__subscriptions.clear()
 
-    def emit(self,
-             event_type: str,
-             payload: dict[str, Any],
-             correlation_id: str = "") -> Event:
-        """Creates, signs, publishes and returns a new event."""
+    def emit(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        correlation_id: str = "",
+    ) -> Event:
+        """Create, sign, publish and return a new event.
+
+        Args:
+            event_type: The event type string.
+            payload: Event payload dictionary.
+            correlation_id: Optional correlation ID for tracing.
+
+        Returns:
+            The signed Event that was published.
+        """
         if self.__authz:
             self.__authz.assert_publish(self.__service_id, event_type)
             self.__authz.trust(self.__service_id, self.__identity.public_key)
@@ -224,7 +257,9 @@ class NanoService(ABC):
             parent_span_id=parent_span_id,
         )
         payload_str: str = json.dumps(payload, sort_keys=True)
-        to_sign: str = f"{event.event_id}:{event.timestamp}:{event.event_type}:{payload_str}"
+        to_sign: str = (
+            f"{event.event_id}:{event.timestamp}:{event.event_type}:{payload_str}"
+        )
         signed: Event = Event(
             event_id=event.event_id,
             event_type=event.event_type,
@@ -249,18 +284,29 @@ class NanoService(ABC):
         return signed
 
     def sign_event(self, payload: str) -> str:
-        """Signs an arbitrary payload with this service's identity."""
+        """Sign an arbitrary payload with this service's identity.
+
+        Args:
+            payload: The string payload to sign.
+
+        Returns:
+            The hex-encoded signature.
+        """
         return self.__identity.sign(payload)
 
     def __dispatch(self, event: Event) -> None:
+        """Internal: dispatch an event to the handler with authz and idempotency."""
         if not self.__running:
             return
         if self.__authz:
             try:
                 self.__authz.assert_verified(event)
             except AuthzError:
-                logger.warning("signature verification failed for %s from %s",
-                               event.event_id, event.source)
+                logger.warning(
+                    "signature verification failed for %s from %s",
+                    event.event_id,
+                    event.source,
+                )
                 if self.__metrics:
                     self.__metrics.increment(
                         "authz.failures",
@@ -270,13 +316,12 @@ class NanoService(ABC):
                         },
                     )
                 if hasattr(self.__bus, "dlq") and self.__bus.dlq:
-                    self.__bus.dlq.put(event, "authz_failed",
-                                       self.__service_id)
+                    self.__bus.dlq.put(event, "authz_failed", self.__service_id)
                 return
-        if self.__bus.idempotency.is_duplicate(self.__service_id,
-                                               event.event_id):
-            logger.debug("duplicate event %s dropped by %s", event.event_id,
-                         self.__service_id)
+        if self.__bus.idempotency.is_duplicate(self.__service_id, event.event_id):
+            logger.debug(
+                "duplicate event %s dropped by %s", event.event_id, self.__service_id
+            )
             if hasattr(self.__bus, "dlq") and self.__bus.dlq:
                 self.__bus.dlq.put(event, "duplicate", self.__service_id)
             return
@@ -286,19 +331,21 @@ class NanoService(ABC):
             self.__handle_event(event)
 
     def __handle_event(self, event: Event) -> None:
+        """Internal: process a single event with tracing and metrics."""
         start = time.perf_counter()
-        with (self.__tracer.trace(
+        context = (
+            self.__tracer.trace(
                 f"handle.{event.event_type}",
-                trace_id=event.trace_id or event.correlation_id
-                or event.event_id,
+                trace_id=event.trace_id or event.correlation_id or event.event_id,
                 parent_span_id=event.parent_span_id,
-                tags={
-                    "service": self.__service_id,
-                    "event_type": event.event_type
-                },
-        ) if self.__tracer else contextlib.nullcontext()):
+                tags={"service": self.__service_id, "event_type": event.event_type},
+            )
+            if self.__tracer
+            else contextlib.nullcontext()
+        )
+        with context:
             try:
-                old_cid = getattr(log_context, 'correlation_id', None)
+                old_cid = getattr(log_context, "correlation_id", None)
                 log_context.correlation_id = event.correlation_id or ""
                 try:
                     self.handle(event)
@@ -331,8 +378,11 @@ class NanoService(ABC):
                     self.__events_failed += 1
                 if self.__supervisor:
                     self.__supervisor.record_failure(self.__service_id)
-                logger.exception("handler %s failed processing %s",
-                                 self.__service_id, event.event_type)
+                logger.exception(
+                    "handler %s failed processing %s",
+                    self.__service_id,
+                    event.event_type,
+                )
                 if self.__metrics:
                     self.__metrics.increment(
                         "events.failed",
@@ -344,10 +394,19 @@ class NanoService(ABC):
 
     @abstractmethod
     def handle(self, event: Event) -> None:
-        """Process an incoming event.  Override in subclasses."""
+        """Process an incoming event. Override in subclasses.
+
+        Args:
+            event: The incoming Event to process.
+        """
 
     def health_check(self) -> dict[str, Any]:
-        """Health check for this service.  Override to add service-specific checks."""
+        """Health check for this service. Override for service-specific checks.
+
+        Returns:
+            Dict with keys: ok, service_id, events_handled, events_failed,
+            last_event_time.
+        """
         with self.__counter_lock:
             return {
                 "ok": self.__running,
@@ -361,20 +420,19 @@ class NanoService(ABC):
 class StatefulService(NanoService, ABC):
     """Base class for nano services that hold mutable in-memory state.
 
-    Provides a shared reentrant lock (``self.state_lock``) and factory
-    helpers for creating ``StoreRepository`` instances bound to the
+    Provides a shared reentrant lock (self.state_lock) and factory
+    helpers for creating StoreRepository instances bound to the
     service's store.
 
-    Usage::
-
+    Typical usage:
         class MyService(StatefulService):
             def __init__(self, **kwargs):
                 super().__init__(**kwargs)
-                self._data: dict[str, Any] = {}
-                self._repo = self.store_repo("data", dict)
-                loaded = self._repo.load(default={})
+                self.data: dict[str, Any] = {}
+                self.repo = self.store_repo('data', dict)
+                loaded = self.repo.load(default={})
                 if loaded:
-                    self._data = loaded
+                    self.data = loaded
     """
 
     def store_repo(
@@ -382,16 +440,17 @@ class StatefulService(NanoService, ABC):
         suffix: str,
         expected_type: type | tuple[type, ...] = object,
     ) -> TypedStoreRepository:
-        """Create a ``TypedStoreRepository`` for *suffix* under this service's ID.
+        """Create a TypedStoreRepository for suffix under this service's ID.
 
-        The store key is ``f"{self.service_id}:{suffix}"``.
+        The store key is f'{self.service_id}:{suffix}'.
 
         Args:
-            suffix: Key suffix (e.g. ``"collateral"`` → key ``"collateral:collateral"``).
+            suffix: Key suffix (e.g. 'collateral' -> key
+                'collateral:collateral').
             expected_type: Type constraint for loaded values.
 
         Returns:
-            A new ``TypedStoreRepository`` bound to this service's store.
+            A new TypedStoreRepository bound to this service's store.
         """
         from underwrite.services.persistence import TypedStoreRepository
 
@@ -407,15 +466,16 @@ class StatefulService(NanoService, ABC):
         expected_type: type | tuple[type, ...] = object,
         sync_interval: int = 10,
     ) -> BatchedStoreRepository:
-        """Create a ``BatchedStoreRepository`` for *suffix* under this service's ID.
+        """Create a BatchedStoreRepository for suffix under this service's ID.
 
         Args:
             suffix: Key suffix.
             expected_type: Type constraint for loaded values.
-            sync_interval: Persist only every N ``incr_and_maybe_sync()`` calls.
+            sync_interval: Persist only every N incr_and_maybe_sync()
+                calls.
 
         Returns:
-            A new ``BatchedStoreRepository``.
+            A new BatchedStoreRepository.
         """
         from underwrite.services.persistence import BatchedStoreRepository
 

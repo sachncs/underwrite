@@ -20,10 +20,10 @@ class SettlementService(StatefulService):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.__settlements: list[dict[str, Any]] = []
-        self._repo: TypedStoreRepository[list[dict[str,
-                                                   Any]]] = self.store_repo(
-                                                       "settlements", list)
-        loaded = self._repo.load(default=[])
+        self.repo: TypedStoreRepository[list[dict[str, Any]]] = self.store_repo(
+            "settlements", list
+        )
+        loaded = self.repo.load(default=[])
         if loaded:
             self.__settlements = loaded
 
@@ -38,6 +38,11 @@ class SettlementService(StatefulService):
             return list(self.__settlements)
 
     def handle(self, event: Event) -> None:
+        """Process a default event and emit a settlement.
+
+        Args:
+            event: The incoming domain event.
+        """
         if event.event_type != EventType.DEFAULT_OCCURRED:
             return
         p = event.payload
@@ -64,8 +69,6 @@ class SettlementService(StatefulService):
             correlation_id=event.correlation_id,
         )
 
-    # -- state persistence ---------------------------------------------------
-
     def __sync(self) -> None:
         """Persist the in-memory settlements to the shared store."""
-        self._repo.save(self.__settlements)
+        self.repo.save(self.__settlements)

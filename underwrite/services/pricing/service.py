@@ -8,6 +8,8 @@ transparent fee disclosure for Indian retail lending.
 
 from __future__ import annotations
 
+import math
+
 from typing import Any
 
 from underwrite.__events__ import Event, EventType
@@ -25,7 +27,16 @@ PENAL_INTEREST_CAP: float = 0.24
 MIN_PRINCIPAL_FOR_CAP: float = 50000.0
 
 
-def _compute_rate_cap(principal: float, loan_type: str = "personal") -> float:
+def compute_rate_cap(principal: float, loan_type: str = "personal") -> float:
+    """Compute the maximum permissible interest rate for a loan.
+
+    Args:
+        principal: Loan principal amount.
+        loan_type: Type of loan (home, gold, personal, micro).
+
+    Returns:
+        Maximum annual interest rate cap.
+    """
     if principal < MIN_PRINCIPAL_FOR_CAP:
         return MICRO_LOAN_CAP
     caps = {
@@ -42,20 +53,28 @@ class PricingService(NanoService):
 
     def __init__(self, **kwargs: Any) -> None:
         self.__rate_cap: float = kwargs.pop("rate_cap", DEFAULT_LOAN_CAP)
-        self.__penal_interest_cap: float = kwargs.pop("penal_interest_cap",
-                                                       PENAL_INTEREST_CAP)
+        self.__penal_interest_cap: float = kwargs.pop(
+            "penal_interest_cap", PENAL_INTEREST_CAP
+        )
         self.__has_risk_model: bool = kwargs.pop("has_risk_model", False)
         super().__init__(**kwargs)
+        self.handlers: dict[str, Any] = {
+            EventType.PRICING_REQUEST: self.compute_pricing,
+            "pricing.penal_interest": self.compute_penal_interest,
+            "pricing.foreclosure": self.compute_foreclosure,
+        }
 
     def handle(self, event: Event) -> None:
-        if event.event_type == EventType.PRICING_REQUEST:
-            self._compute_pricing(event)
-        elif event.event_type == "pricing.penal_interest":
-            self._compute_penal_interest(event)
-        elif event.event_type == "pricing.foreclosure":
-            self._compute_foreclosure(event)
+        handler = self.handlers.get(event.event_type)
+        if handler is not None:
+            handler(event)
 
-    def _compute_pricing(self, event: Event) -> None:
+    def compute_pricing(self, event: Event) -> None:
+        """Compute loan pricing including interest rate, fees, and APR.
+
+        Args:
+            event: The PRICING_REQUEST event.
+        """
         p = event.payload
         borrower: str = get_non_empty(p, "borrower", "")
         principal: float = get_finite(p, "principal", 0.0)
@@ -68,22 +87,21 @@ class PricingService(NanoService):
         risk_premium: float = dp * RISK_PREMIUM_MULTIPLIER
         interest_rate: float = BASE_RATE + risk_premium
 
-        rate_cap = _compute_rate_cap(principal, loan_type)
+        rate_cap = compute_rate_cap(principal, loan_type)
         if interest_rate > rate_cap:
             interest_rate = rate_cap
 
-        origination_fee_pct = self._origination_fee_pct(principal, loan_type)
+        origination_fee_pct = self.origination_fee_pct(principal, loan_type)
         origination_fee: float = principal * origination_fee_pct
-        processing_fee: float = self._processing_fee(principal)
+        processing_fee: float = self.processing_fee(principal)
         gst_on_fees: float = round((origination_fee + processing_fee) * 0.18, 2)
         total_upfront_fees: float = origination_fee + processing_fee + gst_on_fees
 
         monthly_rate = interest_rate / 12.0
-        emi = self._compute_emi(principal, monthly_rate, tenure_months)
+        emi = self.compute_emi(principal, monthly_rate, tenure_months)
         total_repayment = emi * tenure_months
         total_interest = total_repayment - principal
-        apr = self._compute_apr(principal, emi, tenure_months,
-                                total_upfront_fees)
+        apr = self.compute_apr(principal, emi, tenure_months, total_upfront_fees)
 
         result: dict[str, Any] = {
             "borrower": borrower,
@@ -112,10 +130,16 @@ class PricingService(NanoService):
             dti = (emi / annual_income * 12) if annual_income > 0 else 0
             result["debt_to_income_ratio"] = round(dti, 4)
 
-        self.emit(EventType.PRICING_COMPUTED, result,
-                  correlation_id=event.correlation_id)
+        self.emit(
+            EventType.PRICING_COMPUTED, result, correlation_id=event.correlation_id
+        )
 
-    def _compute_penal_interest(self, event: Event) -> None:
+    def compute_penal_interest(self, event: Event) -> None:
+        """Compute penal interest on overdue amounts.
+
+        Args:
+            event: The pricing.penal_interest event.
+        """
         p = event.payload
         borrower: str = get_non_empty(p, "borrower", "")
         overdue_amount: float = get_finite(p, "overdue_amount", 0.0)
@@ -124,34 +148,55 @@ class PricingService(NanoService):
         daily_penal_rate = self.__penal_interest_cap / 365.0
         penal_amount = overdue_amount * daily_penal_rate * overdue_days
 
-        self.emit("pricing.penal_interest_computed", {
-            "borrower": borrower,
-            "overdue_amount": overdue_amount,
-            "overdue_days": overdue_days,
-            "penal_interest_rate": self.__penal_interest_cap,
-            "penal_interest_amount": round(penal_amount, 2),
-        }, correlation_id=event.correlation_id)
+        self.emit(
+            "pricing.penal_interest_computed",
+            {
+                "borrower": borrower,
+                "overdue_amount": overdue_amount,
+                "overdue_days": overdue_days,
+                "penal_interest_rate": self.__penal_interest_cap,
+                "penal_interest_amount": round(penal_amount, 2),
+            },
+            correlation_id=event.correlation_id,
+        )
 
-    def _compute_foreclosure(self, event: Event) -> None:
+    def compute_foreclosure(self, event: Event) -> None:
+        """Compute foreclosure charges for a loan.
+
+        Args:
+            event: The pricing.foreclosure event.
+        """
         p = event.payload
         borrower: str = get_non_empty(p, "borrower", "")
-        outstanding_principal: float = get_finite(
-            p, "outstanding_principal", 0.0)
+        outstanding_principal: float = get_finite(p, "outstanding_principal", 0.0)
         loan_type: str = p.get("loan_type", "personal")
 
-        foreclosure_charge_pct = self._foreclosure_charge_pct(loan_type)
+        foreclosure_charge_pct = self.foreclosure_charge_pct(loan_type)
         foreclosure_amount = outstanding_principal * foreclosure_charge_pct
         total_due = outstanding_principal + foreclosure_amount
 
-        self.emit("pricing.foreclosure_computed", {
-            "borrower": borrower,
-            "outstanding_principal": outstanding_principal,
-            "foreclosure_charge_pct": foreclosure_charge_pct,
-            "foreclosure_charge": round(foreclosure_amount, 2),
-            "total_due": round(total_due, 2),
-        }, correlation_id=event.correlation_id)
+        self.emit(
+            "pricing.foreclosure_computed",
+            {
+                "borrower": borrower,
+                "outstanding_principal": outstanding_principal,
+                "foreclosure_charge_pct": foreclosure_charge_pct,
+                "foreclosure_charge": round(foreclosure_amount, 2),
+                "total_due": round(total_due, 2),
+            },
+            correlation_id=event.correlation_id,
+        )
 
-    def _origination_fee_pct(self, principal: float, loan_type: str) -> float:
+    def origination_fee_pct(self, principal: float, loan_type: str) -> float:
+        """Return the origination fee percentage based on loan type.
+
+        Args:
+            principal: Loan principal amount.
+            loan_type: Type of loan.
+
+        Returns:
+            Origination fee as a decimal fraction.
+        """
         if loan_type == "home":
             return 0.005
         elif loan_type == "gold":
@@ -160,12 +205,28 @@ class PricingService(NanoService):
             return 0.02 if principal < 10000 else 0.015
         return 0.01
 
-    def _processing_fee(self, principal: float) -> float:
+    def processing_fee(self, principal: float) -> float:
+        """Compute the processing fee for a loan.
+
+        Args:
+            principal: Loan principal amount.
+
+        Returns:
+            Processing fee amount.
+        """
         if principal <= 10000:
             return 0.0
         return min(principal * 0.0025, 5000.0)
 
-    def _foreclosure_charge_pct(self, loan_type: str) -> float:
+    def foreclosure_charge_pct(self, loan_type: str) -> float:
+        """Return the foreclosure charge percentage based on loan type.
+
+        Args:
+            loan_type: Type of loan.
+
+        Returns:
+            Foreclosure charge as a decimal fraction.
+        """
         if loan_type == "home":
             return 0.0
         elif loan_type in ("personal", "micro"):
@@ -173,32 +234,57 @@ class PricingService(NanoService):
         return 0.04
 
     @staticmethod
-    def _compute_emi(principal: float, monthly_rate: float,
-                     tenure_months: int) -> float:
+    def compute_emi(principal: float, monthly_rate: float, tenure_months: int) -> float:
+        """Compute the equated monthly installment.
+
+        Args:
+            principal: Loan principal amount.
+            monthly_rate: Monthly interest rate (annual / 12).
+            tenure_months: Loan tenure in months.
+
+        Returns:
+            EMI amount.
+        """
         if monthly_rate <= 0 or tenure_months <= 0:
             return principal / max(tenure_months, 1)
-        factor = (1 + monthly_rate)**tenure_months
+        factor = math.exp(tenure_months * math.log1p(monthly_rate))
         return principal * monthly_rate * factor / (factor - 1)
 
     @staticmethod
-    def _compute_apr(principal: float, emi: float, tenure_months: int,
-                     total_fees: float) -> float:
+    def compute_apr(
+        principal: float, emi: float, tenure_months: int, total_fees: float
+    ) -> float:
+        """Compute the annual percentage rate using Newton-Raphson.
+
+        Args:
+            principal: Loan principal amount.
+            emi: Monthly installment amount.
+            tenure_months: Loan tenure in months.
+            total_fees: Total upfront fees deducted from principal.
+
+        Returns:
+            APR as a percentage.
+        """
         net_principal = principal - total_fees
         if net_principal <= 0 or emi <= 0 or tenure_months <= 0:
             return 0.0
         rate = 0.01
         for _ in range(100):
-            factor = (1.0 + rate)**tenure_months
+            if rate <= 0:
+                rate = 0.0001
+            factor = math.exp(tenure_months * math.log1p(rate))
             pv = emi * (factor - 1.0) / (rate * factor)
             diff = pv - net_principal
             if abs(diff) < 0.0001:
                 break
-            derivative = emi * ((1.0 + rate)**tenure_months *
-                                (1.0 - tenure_months * rate) -
-                                1.0) / (rate * rate * factor)
+            if rate == 0:
+                break
+            derivative = (
+                emi
+                * (factor * (1.0 - tenure_months * rate) - 1.0)
+                / (rate * rate * factor)
+            )
             if derivative == 0:
                 break
             rate -= diff / derivative
-            if rate <= 0:
-                rate = 0.0001
         return rate * 12.0 * 100.0

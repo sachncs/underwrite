@@ -15,14 +15,20 @@ from underwrite.services.base import StatefulService
 
 STAGES: dict[str, list[str]] = {
     "origination": [
-        "created", "kyc_pending", "risk_review", "underwriting", "approved",
-        "disbursed"
+        "created",
+        "kyc_pending",
+        "risk_review",
+        "underwriting",
+        "approved",
+        "disbursed",
     ],
-    "recovery":
-    ["started", "contact_made", "negotiation", "settlement", "closed"],
+    "recovery": ["started", "contact_made", "negotiation", "settlement", "closed"],
     "default": [
-        "noticed", "npa_classified", "collateral_review", "recovery",
-        "chargeoff"
+        "noticed",
+        "npa_classified",
+        "collateral_review",
+        "recovery",
+        "chargeoff",
     ],
 }
 
@@ -32,7 +38,7 @@ class WorkflowService(StatefulService):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self._handlers: dict[str, Any] = {
+        self.handlers: dict[str, Any] = {
             EventType.WORKFLOW_START: self.__on_workflow_start,
             EventType.WORKFLOW_ADVANCE: self.__on_workflow_advance,
             EventType.ORIGINATION_SUBMITTED: self.__on_origination_submitted,
@@ -40,11 +46,16 @@ class WorkflowService(StatefulService):
         }
 
     def handle(self, event: Event) -> None:
-        handler = self._handlers.get(event.event_type)
+        handler = self.handlers.get(event.event_type)
         if handler is not None:
             handler(event)
 
     def __on_workflow_start(self, event: Event) -> None:
+        """Start a new workflow instance.
+
+        Args:
+            event: The WORKFLOW_START event.
+        """
         self.__start_workflow(
             event.payload.get("type", ""),
             event.payload.get("entity_id", ""),
@@ -52,26 +63,46 @@ class WorkflowService(StatefulService):
         )
 
     def __on_workflow_advance(self, event: Event) -> None:
+        """Advance a workflow to the next stage.
+
+        Args:
+            event: The WORKFLOW_ADVANCE event.
+        """
         self.__advance_workflow(
             event.payload.get("entity_id", ""),
             event.correlation_id,
         )
 
     def __on_origination_submitted(self, event: Event) -> None:
+        """Start an origination workflow when an application is submitted.
+
+        Args:
+            event: The ORIGINATION_SUBMITTED event.
+        """
         entity_id = event.payload.get("application_id", "")
         if entity_id and not self.store.get(f"workflow:{entity_id}"):
-            self.__start_workflow("origination", entity_id,
-                                  event.correlation_id)
+            self.__start_workflow("origination", entity_id, event.correlation_id)
 
     def __on_underwriter_approved(self, event: Event) -> None:
+        """Advance the workflow when underwriter approves.
+
+        Args:
+            event: The UNDERWRITER_APPROVED event.
+        """
         entity_id = event.payload.get("application_id", "")
         if entity_id:
             self.__advance_workflow(entity_id, event.correlation_id)
 
-    def __start_workflow(self,
-                         workflow_type: str,
-                         entity_id: str,
-                         correlation_id: str = "") -> None:
+    def __start_workflow(
+        self, workflow_type: str, entity_id: str, correlation_id: str = ""
+    ) -> None:
+        """Start a new workflow in the store and emit WORKFLOW_STARTED.
+
+        Args:
+            workflow_type: The workflow type identifier.
+            entity_id: The entity the workflow tracks.
+            correlation_id: Correlation ID for emitted events.
+        """
         if not workflow_type or not entity_id:
             return
         stages = STAGES.get(workflow_type, ["started"])
@@ -97,9 +128,13 @@ class WorkflowService(StatefulService):
             correlation_id=correlation_id,
         )
 
-    def __advance_workflow(self,
-                           entity_id: str,
-                           correlation_id: str = "") -> None:
+    def __advance_workflow(self, entity_id: str, correlation_id: str = "") -> None:
+        """Advance a workflow to the next stage or complete it.
+
+        Args:
+            entity_id: The entity identifier.
+            correlation_id: Correlation ID for emitted events.
+        """
         if not entity_id:
             return
         with self.state_lock:

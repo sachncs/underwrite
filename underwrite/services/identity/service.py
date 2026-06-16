@@ -1,4 +1,4 @@
-"""Identity management — key registration and rotation."""
+"""Identity management - key registration and rotation."""
 
 from __future__ import annotations
 
@@ -20,9 +20,47 @@ class IdentityService(NanoService):
         self.__lock: threading.RLock = threading.RLock()
 
     def handle(self, event: Event) -> None:
+        """Process identity registration and rotation events.
+
+        Args:
+            event: The incoming domain event.
+        """
         if event.event_type == EventType.IDENTITY_REGISTER:
-            service_id: str = get_non_empty(event.payload, "service_id")
-            identity: Identity = Identity.create(service_id)
+            self.register(event)
+        elif event.event_type == EventType.IDENTITY_ROTATE:
+            self.rotate(event)
+
+    def register(self, event: Event) -> None:
+        """Register a new service identity."""
+        service_id: str = get_non_empty(event.payload, "service_id")
+        identity: Identity = Identity.create(service_id)
+        self.store.set(
+            f"identity:{service_id}",
+            {
+                "service_id": service_id,
+                "public_key": identity.public_key,
+            },
+        )
+        self.emit(
+            EventType.IDENTITY_REGISTERED,
+            {
+                "service_id": service_id,
+                "public_key": identity.public_key,
+            },
+            correlation_id=event.correlation_id,
+        )
+
+    def rotate(self, event: Event) -> None:
+        """Rotate the key for an existing service identity."""
+        service_id = get_non_empty(event.payload, "service_id")
+        with self.__lock:
+            existing = self.store.get(f"identity:{service_id}")
+            if not existing:
+                logger.warning(
+                    "identity rotation requested for unknown service %r", service_id
+                )
+                return
+            identity = Identity.create(service_id)
             self.store.set(
                 f"identity:{service_id}",
                 {
@@ -30,36 +68,11 @@ class IdentityService(NanoService):
                     "public_key": identity.public_key,
                 },
             )
-            self.emit(
-                EventType.IDENTITY_REGISTERED,
-                {
-                    "service_id": service_id,
-                    "public_key": identity.public_key,
-                },
-                correlation_id=event.correlation_id,
-            )
-        elif event.event_type == EventType.IDENTITY_ROTATE:
-            service_id = get_non_empty(event.payload, "service_id")
-            with self.__lock:
-                existing = self.store.get(f"identity:{service_id}")
-                if not existing:
-                    logger.warning(
-                        "identity rotation requested for unknown service %r",
-                        service_id)
-                    return
-                identity = Identity.create(service_id)
-                self.store.set(
-                    f"identity:{service_id}",
-                    {
-                        "service_id": service_id,
-                        "public_key": identity.public_key,
-                    },
-                )
-            self.emit(
-                EventType.IDENTITY_ROTATED,
-                {
-                    "service_id": service_id,
-                    "public_key": identity.public_key,
-                },
-                correlation_id=event.correlation_id,
-            )
+        self.emit(
+            EventType.IDENTITY_ROTATED,
+            {
+                "service_id": service_id,
+                "public_key": identity.public_key,
+            },
+            correlation_id=event.correlation_id,
+        )

@@ -1,24 +1,13 @@
 """Generic store-backed repository for nano-service state persistence.
 
-Replaces the manual ``__sync_store`` / ``__load_store`` boilerplate
-with a reusable, type-safe abstraction.  Encapsulates key management,
-serialization, and type validation in one place.
+Replaces manual __sync_store / __load_store boilerplate with a reusable,
+type-safe abstraction. Encapsulates key management, serialization, and
+type validation in one place.
 
-Usage::
-
-    from underwrite.services.persistence import StoreRepository
-
-    class MyService(NanoService):
-        def __init__(self, **kwargs):
-            super().__init__(**kwargs)
-            self._data: dict[str, Any] = {}
-            self._repo = StoreRepository[dict](self.store, f"{self.service_id}:data")
-            self._loaded = self._repo.load(default={})
-            if self._loaded is not None:
-                self._data = self._loaded
-
-        def _sync(self) -> None:
-            self._repo.save(self._data)
+Typical usage:
+    repo = StoreRepository[dict](store, f'{service_id}:data')
+    data = repo.load(default={})
+    repo.save(data)
 """
 
 from __future__ import annotations
@@ -35,38 +24,39 @@ T = TypeVar("T")
 class StoreRepository(Generic[T]):
     """Generic thread-safe repository for store-backed state.
 
-    Handles key prefixing, serialization, and type-safe loading.
-    Does **not** manage its own lock — the caller is responsible for
+    Handles key prefixing, serialization, and type-safe loading. Does
+    *not* manage its own lock — the caller is responsible for
     concurrency control (use the service's own lock).
     """
 
     def __init__(self, store: Store, key: str) -> None:
-        """Initialise the repository.
+        """Initialize the repository.
 
         Args:
             store: The shared Store backend.
             key: Store key to read/write state under.
         """
-        self._store = store
-        self._key = key
+        self.store = store
+        self.key = key
 
     def load(self, default: T | None = None) -> T | None:
         """Load state from the store.
 
         Args:
-            default: Value returned when the key is missing.
+            default: Value returned when the key is missing or the read
+                fails.
 
         Returns:
             The deserialized state, or *default* if the key does not
             exist or the read fails.
         """
         try:
-            raw = self._store.get(self._key)
+            raw = self.store.get(self.key)
             if raw is None:
                 return default
             return self.deserialize(raw)
         except Exception:
-            logger.exception("failed to load %s from store", self._key)
+            logger.exception("failed to load %s from store", self.key)
             return default
 
     def save(self, data: T) -> None:
@@ -78,7 +68,7 @@ class StoreRepository(Generic[T]):
         Raises:
             StoreError: If the store write fails.
         """
-        self._store.set(self._key, self.serialize(data))
+        self.store.set(self.key, self.serialize(data))
 
     def deserialize(self, raw: Any) -> T:
         """Override in subclasses for custom deserialization."""
@@ -90,7 +80,7 @@ class StoreRepository(Generic[T]):
 
 
 class TypedStoreRepository(StoreRepository[T]):
-    """A ``StoreRepository`` that validates the loaded value type.
+    """A StoreRepository that validates the loaded value type.
 
     If the stored value is not an instance of *expected_type* the
     repository returns *default*, preventing silent data corruption.
@@ -102,34 +92,42 @@ class TypedStoreRepository(StoreRepository[T]):
         key: str,
         expected_type: type | tuple[type, ...],
     ) -> None:
+        """Initialize the typed repository.
+
+        Args:
+            store: The shared Store backend.
+            key: Store key to read/write state under.
+            expected_type: Type or tuple of types that loaded values
+                must be instances of.
+        """
         super().__init__(store, key)
-        self._expected_type = expected_type
+        self.expected_type = expected_type
 
     def load(self, default: T | None = None) -> T | None:
-        raw = super().load(default)
-        if raw is default or raw is None:
+        raw = self.store.get(self.key)
+        if raw is None:
             return default
-        if not isinstance(raw, self._expected_type):
+        if not isinstance(raw, self.expected_type):
             logger.warning(
-                "expected %s for key %s, got %s — returning default",
-                self._expected_type,
-                self._key,
+                "expected %s for key %s, got %s - returning default",
+                self.expected_type,
+                self.key,
                 type(raw).__name__,
             )
             return default
-        return raw
+        return cast(T, raw)
 
 
 class BatchedStoreRepository(TypedStoreRepository[T]):
-    """A ``TypedStoreRepository`` with batched persistence.
+    """A TypedStoreRepository with batched persistence.
 
-    Instead of writing to the store on every ``save()`` call, accumulates
+    Instead of writing to the store on every save() call, accumulates
     a counter and only triggers the actual sync every *sync_interval*
-    ``incr_and_maybe_sync()`` calls.  Useful for high-frequency state
+    incr_and_maybe_sync() calls. Useful for high-frequency state
     updates where O(n) serialization is a concern.
 
-    Subclasses must call ``incr_and_maybe_sync()`` or ``force_sync()``
-    to persist; a plain ``save()`` still writes immediately.
+    Subclasses must call incr_and_maybe_sync() or force_sync() to
+    persist; a plain save() still writes immediately.
     """
 
     def __init__(
@@ -139,13 +137,22 @@ class BatchedStoreRepository(TypedStoreRepository[T]):
         expected_type: type | tuple[type, ...],
         sync_interval: int = 10,
     ) -> None:
+        """Initialize the batched repository.
+
+        Args:
+            store: The shared Store backend.
+            key: Store key to read/write state under.
+            expected_type: Type constraint for loaded values.
+            sync_interval: Persist only every N incr_and_maybe_sync()
+                calls. Minimum value is 1.
+        """
         super().__init__(store, key, expected_type)
         self.__batch_lock: threading.Lock = threading.Lock()
         self.__sync_interval: int = max(sync_interval, 1)
         self.__sync_counter: int = 0
 
     def incr_and_maybe_sync(self, data: T) -> bool:
-        """Increments the counter and triggers sync if threshold reached.
+        """Increment the counter and trigger sync if threshold reached.
 
         Args:
             data: The state to persist when the threshold is met.
@@ -162,12 +169,16 @@ class BatchedStoreRepository(TypedStoreRepository[T]):
         return False
 
     def force_sync(self, data: T) -> None:
-        """Immediately persists regardless of the counter."""
+        """Immediately persist regardless of the counter.
+
+        Args:
+            data: The state to persist.
+        """
         with self.__batch_lock:
             self.__sync_counter = 0
             self.save(data)
 
     def reset_counter(self) -> None:
-        """Resets the internal sync counter without persisting."""
+        """Reset the internal sync counter without persisting."""
         with self.__batch_lock:
             self.__sync_counter = 0

@@ -41,44 +41,55 @@ class ReportingService(StatefulService):
             "loss": 0.0,
         }
         self.__provisioning_total: float = 0.0
-        self._repo: TypedStoreRepository[dict[str, Any]] = self.store_repo(
-            "counters", dict)
-        loaded = self._repo.load(default={})
+        self.repo: TypedStoreRepository[dict[str, Any]] = self.store_repo(
+            "counters", dict
+        )
+        loaded = self.repo.load(default={})
         if loaded:
             self.__originations = loaded.get("originations", 0)
             self.__defaults = loaded.get("defaults", 0)
             self.__total_principal = loaded.get("total_principal", 0.0)
 
     def handle(self, event: Event) -> None:
+        """Process events to update portfolio metrics.
+
+        Args:
+            event: The incoming domain event.
+        """
         if event.event_type == EventType.LOAN_ORIGINATED:
             with self.state_lock:
                 self.__originations += 1
-                self.__total_principal += get_finite(event.payload,
-                                                      "principal")
+                self.__total_principal += get_finite(event.payload, "principal")
                 self.__sync()
         elif event.event_type == EventType.DEFAULT_OCCURRED:
             with self.state_lock:
                 self.__defaults += 1
                 self.__sync()
         elif event.event_type == EventType.NPA_BUCKET_CHANGED:
-            self._track_bucket_change(event)
+            self.track_bucket_change(event)
         elif event.event_type == EventType.PROVISIONING_COMPUTED:
-            self._track_provisioning(event)
+            self.track_provisioning(event)
 
-    def _track_bucket_change(self, event: Event) -> None:
-        """Update bucket-wise counters when NPA classification changes."""
+    def track_bucket_change(self, event: Event) -> None:
+        """Update bucket-wise counters when NPA classification changes.
+
+        Args:
+            event: The NPA_BUCKET_CHANGED event.
+        """
         borrower: str = event.payload.get("borrower", "")
         bucket: str = event.payload.get("bucket", "standard")
         if not borrower or bucket not in self.__bucket_counts:
             return
         with self.state_lock:
-            self.__bucket_counts[bucket] = self.__bucket_counts.get(
-                bucket, 0) + 1
+            self.__bucket_counts[bucket] = self.__bucket_counts.get(bucket, 0) + 1
 
-    def _track_provisioning(self, event: Event) -> None:
-        """Track total provisioning amount."""
-        amount: float = get_finite(event.payload, "provisioning_amount",
-                                   0.0)
+    def track_provisioning(self, event: Event) -> None:
+        """Track total provisioning amount.
+
+        Args:
+            event: The PROVISIONING_COMPUTED event.
+        """
+        amount: float = get_finite(event.payload, "provisioning_amount", 0.0)
         bucket: str = event.payload.get("bucket", "")
         principal: float = get_finite(event.payload, "outstanding", 0.0)
         if bucket not in self.__bucket_principals:
@@ -87,9 +98,7 @@ class ReportingService(StatefulService):
             self.__bucket_principals[bucket] = principal
             self.__provisioning_total += amount
 
-    def generate_report(self,
-                        report_type: str = "portfolio_summary"
-                        ) -> dict[str, Any]:
+    def generate_report(self, report_type: str = "portfolio_summary") -> dict[str, Any]:
         """Generate a regulatory report from accumulated metrics.
 
         Args:
@@ -101,58 +110,47 @@ class ReportingService(StatefulService):
             and portfolio health metrics.
         """
         return {
-            "report_type":
-            report_type,
-            "generated_at":
-            datetime.now(timezone.utc).isoformat(),
-            "total_originations":
-            self.__originations,
-            "total_defaults":
-            self.__defaults,
-            "total_principal_originated":
-            self.__total_principal,
-            "default_rate":
-            self.__defaults / max(self.__originations, 1),
+            "report_type": report_type,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "total_originations": self.__originations,
+            "total_defaults": self.__defaults,
+            "total_principal_originated": self.__total_principal,
+            "default_rate": self.__defaults / max(self.__originations, 1),
         }
 
     def generate_npa_report(self) -> dict[str, Any]:
         """Generate an NPA-specific regulatory report.
 
-        Returns bucket-wise counts, outstanding principals, and
-        provisioning coverage information.
+        Returns:
+            Dict with bucket-wise counts, outstanding principals, and
+            provisioning coverage information.
         """
         with self.state_lock:
-            npa_principal = (self.__bucket_principals.get("substandard",
-                                                          0.0)
-                             + self.__bucket_principals.get("doubtful", 0.0)
-                             + self.__bucket_principals.get("loss", 0.0))
+            npa_principal = (
+                self.__bucket_principals.get("substandard", 0.0)
+                + self.__bucket_principals.get("doubtful", 0.0)
+                + self.__bucket_principals.get("loss", 0.0)
+            )
             total = self.__total_principal or 1.0
             return {
-                "report_type":
-                "npa_detailed",
-                "generated_at":
-                datetime.now(timezone.utc).isoformat(),
-                "bucket_counts":
-                dict(self.__bucket_counts),
-                "bucket_principals":
-                dict(self.__bucket_principals),
-                "npa_principal":
-                npa_principal,
-                "npa_ratio":
-                round(npa_principal / total, 6),
-                "total_provisioning":
-                round(self.__provisioning_total, 2),
-                "provisioning_coverage_ratio":
-                round(self.__provisioning_total /
-                      max(npa_principal, 1.0), 6),
+                "report_type": "npa_detailed",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "bucket_counts": dict(self.__bucket_counts),
+                "bucket_principals": dict(self.__bucket_principals),
+                "npa_principal": npa_principal,
+                "npa_ratio": round(npa_principal / total, 6),
+                "total_provisioning": round(self.__provisioning_total, 2),
+                "provisioning_coverage_ratio": round(
+                    self.__provisioning_total / max(npa_principal, 1.0), 6
+                ),
             }
-
-    # -- state persistence ---------------------------------------------------
 
     def __sync(self) -> None:
         """Persist the in-memory counters to the shared store."""
-        self._repo.save({
-            "originations": self.__originations,
-            "defaults": self.__defaults,
-            "total_principal": self.__total_principal,
-        })
+        self.repo.save(
+            {
+                "originations": self.__originations,
+                "defaults": self.__defaults,
+                "total_principal": self.__total_principal,
+            }
+        )

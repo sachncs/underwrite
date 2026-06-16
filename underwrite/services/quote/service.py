@@ -36,15 +36,18 @@ class QuoteService(NanoService):
                 1e6,
             )
 
-        self.emit(EventType.QUOTE_CALCULATED, {
-            "borrower": borrower,
-            "principal": principal,
-            "term": term,
-            "default_probability": dp,
-            "protocol_rate": pr,
-            "max_delegation_rate": mdr,
-            "protocol_premium": protocol_premium,
-            "break_even_rate": break_even,
-            "total_interest": protocol_premium,
-        },
-                  correlation_id=event.correlation_id)
+        self.emit(
+            EventType.QUOTE_CALCULATED,
+            {
+                "borrower": borrower,
+                "principal": principal,
+                "term": term,
+                "default_probability": dp,
+                "protocol_rate": pr,
+                "max_delegation_rate": mdr,
+                "protocol_premium": protocol_premium,
+                "break_even_rate": break_even,
+                "total_interest": protocol_premium,
+            },
+            correlation_id=event.correlation_id,
+        )

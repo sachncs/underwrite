@@ -47,26 +47,27 @@ class NPAService(StatefulService):
         self.__npa_days: int = kwargs.get("npa_days", 90)
         self.__provisioning_rates: dict[str, float] = {
             "standard": kwargs.get("standard_provisioning_rate", 0.0025),
-            "substandard": kwargs.get("substandard_provisioning_rate",
-                                      0.15),
-            "doubtful": kwargs.get("doubtful_provisioning_rate_secured",
-                                   0.25),
+            "substandard": kwargs.get("substandard_provisioning_rate", 0.15),
+            "doubtful": kwargs.get("doubtful_provisioning_rate_secured", 0.25),
             "loss": kwargs.get("loss_provisioning_rate", 1.0),
         }
-        self._repo: TypedStoreRepository[dict[str,
-                                               dict[str,
-                                                    Any]]] = self.store_repo(
-                                                        "accounts", dict)
-        loaded = self._repo.load(default={})
+        self.repo: TypedStoreRepository[dict[str, dict[str, Any]]] = self.store_repo(
+            "accounts", dict
+        )
+        loaded = self.repo.load(default={})
         if loaded:
             self.__accounts = loaded
 
     def handle(self, event: Event) -> None:
+        """Process loan-originated and default-occurred events.
+
+        Args:
+            event: The incoming domain event.
+        """
         with self.state_lock:
             if event.event_type == EventType.LOAN_ORIGINATED:
                 borrower: str = get_non_empty(event.payload, "borrower")
-                principal: float = get_finite(event.payload, "principal",
-                                              0.0)
+                principal: float = get_finite(event.payload, "principal", 0.0)
                 self.__accounts[borrower] = {
                     "originated_at": datetime.now(timezone.utc).isoformat(),
                     "days_overdue": 0,
@@ -82,18 +83,16 @@ class NPAService(StatefulService):
             elif event.event_type == EventType.DEFAULT_OCCURRED:
                 borrower = event.payload.get("borrower", "")
                 if not borrower:
-                    logger.warning(
-                        "dropping DEFAULT_OCCURRED with missing borrower")
+                    logger.warning("dropping DEFAULT_OCCURRED with missing borrower")
                     return
                 record = self.__accounts.get(borrower)
                 if record is None:
                     return
                 days: int = record.get("days_overdue", self.__trigger_days)
-                event_principal: float = get_finite(
-                    event.payload, "principal", 0.0)
-                self._classify_and_provision(borrower, record, days,
-                                             event.correlation_id,
-                                             event_principal)
+                event_principal: float = get_finite(event.payload, "principal", 0.0)
+                self.classify_and_provision(
+                    borrower, record, days, event.correlation_id, event_principal
+                )
 
     def mark_overdue(self, borrower: str, days: int) -> None:
         """Update the days-past-due counter for a borrower.
@@ -107,15 +106,26 @@ class NPAService(StatefulService):
                 self.__accounts[borrower]["days_overdue"] = days
                 self.__sync()
 
-    def _classify_and_provision(self, borrower: str,
-                                 record: dict[str, Any], days: int,
-                                 correlation_id: str,
-                                 event_principal: float = 0.0) -> None:
-        """Classify account, compute provisioning, check DLG."""
+    def classify_and_provision(
+        self,
+        borrower: str,
+        record: dict[str, Any],
+        days: int,
+        correlation_id: str,
+        event_principal: float = 0.0,
+    ) -> None:
+        """Classify account, compute provisioning, and check DLG trigger.
+
+        Args:
+            borrower: The borrower identifier.
+            record: The account record dict.
+            days: Number of days past due.
+            correlation_id: Correlation ID for emitted events.
+            event_principal: Principal from the event payload.
+        """
         bucket: str = self.classify_overdue_days(days)
 
-        # Emit SMA event if in SMA range but below NPA
-        sma_bucket = self._sma_classify(days)
+        sma_bucket = self.sma_classify(days)
         if sma_bucket:
             self.emit(
                 EventType.SMA_CLASSIFIED,
@@ -130,11 +140,10 @@ class NPAService(StatefulService):
         record["bucket"] = bucket
         record["days_overdue"] = days
 
-        # Provisioning
         rate = self.__provisioning_rates.get(bucket, 0.0)
-        outstanding = record.get("outstanding",
-                                 record.get("principal",
-                                            event_principal or 0.0))
+        outstanding = record.get(
+            "outstanding", record.get("principal", event_principal or 0.0)
+        )
         provisioning_amount = round(outstanding * rate, 2)
 
         self.emit(
@@ -152,12 +161,11 @@ class NPAService(StatefulService):
         record["provisioning_rate"] = rate
         record["provisioning_amount"] = provisioning_amount
 
-        # Income recognition suspension for NPA accounts
-        if bucket in ("substandard", "doubtful", "loss"
-                      ) and not record.get("income_suspended", False):
+        if bucket in ("substandard", "doubtful", "loss") and not record.get(
+            "income_suspended", False
+        ):
             record["income_suspended"] = True
-            record["income_suspended_at"] = datetime.now(
-                timezone.utc).isoformat()
+            record["income_suspended_at"] = datetime.now(timezone.utc).isoformat()
             self.emit(
                 EventType.INCOME_RECOGNITION_SUSPENDED,
                 {
@@ -177,10 +185,9 @@ class NPAService(StatefulService):
             correlation_id=correlation_id,
         )
 
-        # DLG trigger
-        should_trigger_dlg: bool = (
-            days >= self.__trigger_days
-            and not record.get("dlg_invoked", False))
+        should_trigger_dlg: bool = days >= self.__trigger_days and not record.get(
+            "dlg_invoked", False
+        )
         if should_trigger_dlg:
             record["dlg_invoked"] = True
             self.__sync()
@@ -188,23 +195,27 @@ class NPAService(StatefulService):
                 EventType.DLG_TRIGGERED,
                 {
                     "loan_id": borrower,
-                    "recovery_amount":
-                    event_principal or outstanding,
+                    "recovery_amount": event_principal or outstanding,
                 },
                 correlation_id=correlation_id,
             )
 
         self.__sync()
 
-    # -- state persistence ---------------------------------------------------
-
     def __sync(self) -> None:
         """Persist the current NPA accounts to the store."""
-        self._repo.save(self.__accounts)
+        self.repo.save(self.__accounts)
 
     @staticmethod
     def classify_overdue_days(days: int) -> str:
-        """Classify days-past-due into RBI NPA bucket."""
+        """Classify days-past-due into RBI NPA bucket.
+
+        Args:
+            days: Number of days past due.
+
+        Returns:
+            NPA bucket name: standard, substandard, doubtful, or loss.
+        """
         if days <= 90:
             return "standard"
         if days <= 180:
@@ -214,10 +225,15 @@ class NPAService(StatefulService):
         return "loss"
 
     @staticmethod
-    def _sma_classify(days: int) -> str:
-        """Classify days-past-due into SMA (Special Mention Account) bucket.
+    def sma_classify(days: int) -> str:
+        """Classify days-past-due into SMA bucket.
 
-        Returns empty string if outside SMA range.
+        Args:
+            days: Number of days past due.
+
+        Returns:
+            SMA bucket name (sma_0, sma_1, sma_2) or empty string
+            if outside SMA range.
         """
         if days <= 0:
             return ""

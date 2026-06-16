@@ -1,7 +1,7 @@
-"""Disbursement — processes loan payout after document generation.
+"""Disbursement - processes loan payout after document generation.
 
-Listens for ``document.generated`` events and emits
-``disbursement.processed``.
+Listens for document.generated events and emits
+disbursement.processed.
 """
 
 from __future__ import annotations
@@ -22,15 +22,19 @@ class DisbursementService(StatefulService):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.__disbursements: dict[str, dict[str, Any]] = {}
-        self._repo: TypedStoreRepository[dict[str,
-                                              dict[str,
-                                                   Any]]] = self.store_repo(
-                                                       "disbursements", dict)
-        loaded = self._repo.load(default={})
+        self.repo: TypedStoreRepository[dict[str, dict[str, Any]]] = self.store_repo(
+            "disbursements", dict
+        )
+        loaded = self.repo.load(default={})
         if loaded:
             self.__disbursements = loaded
 
     def handle(self, event: Event) -> None:
+        """Process document.generated events to trigger disbursement.
+
+        Args:
+            event: The incoming domain event.
+        """
         if event.event_type != EventType.DOCUMENT_GENERATED:
             return
         p = event.payload
@@ -41,8 +45,8 @@ class DisbursementService(StatefulService):
         with self.state_lock:
             if borrower in self.__disbursements:
                 logger.warning(
-                    "duplicate disbursement attempted for %s, skipping",
-                    borrower)
+                    "duplicate disbursement attempted for %s, skipping", borrower
+                )
                 return
             record = {
                 "borrower": borrower,
@@ -52,7 +56,7 @@ class DisbursementService(StatefulService):
                 "status": "disbursed",
             }
             self.__disbursements[borrower] = record
-            self.__sync()
+            self.repo.save(self.__disbursements)
 
         self.emit(
             EventType.DISBURSEMENT_PROCESSED,
@@ -75,9 +79,3 @@ class DisbursementService(StatefulService):
         """
         with self.state_lock:
             return self.__disbursements.get(borrower)
-
-    # -- state persistence ---------------------------------------------------
-
-    def __sync(self) -> None:
-        """Persist the in-memory disbursements to the shared store."""
-        self._repo.save(self.__disbursements)

@@ -1,4 +1,4 @@
-"""Data Subject Rights (DSR) — DPDPA 2023 compliant request handling.
+"""Data Subject Rights (DSR) - DPDPA 2023 compliant request handling.
 
 Manages data subject requests for access, correction, erasure, and
 grievance redressal as required by the Digital Personal Data
@@ -28,29 +28,32 @@ class DataSubjectRightsService(StatefulService):
 
     def __init__(self, **kwargs: Any) -> None:
         self.__response_days: int = kwargs.pop("response_time_days", 30)
-        self.__grievance_days: int = kwargs.pop("grievance_response_days",
-                                                 15)
+        self.__grievance_days: int = kwargs.pop("grievance_response_days", 15)
         super().__init__(**kwargs)
         self.__requests: dict[str, dict[str, Any]] = {}
         self.__grievances: dict[str, dict[str, Any]] = {}
-        self._repo: TypedStoreRepository[dict[str, Any]] = self.store_repo(
-            "dsr", dict)
-        loaded = self._repo.load(default={})
+        self.repo: TypedStoreRepository[dict[str, Any]] = self.store_repo("dsr", dict)
+        loaded = self.repo.load(default={})
         if loaded:
             self.__requests = loaded.get("requests", {})
             self.__grievances = loaded.get("grievances", {})
 
     def handle(self, event: Event) -> None:
-        if event.event_type == EventType.DSR_REQUEST:
-            self._create_request(event)
-        elif event.event_type == EventType.GRIEVANCE_LOGGED:
-            self._log_grievance(event)
+        """Process DSR and grievance events.
 
-    def _create_request(self, event: Event) -> None:
+        Args:
+            event: The incoming domain event.
+        """
+        if event.event_type == EventType.DSR_REQUEST:
+            self.create_request(event)
+        elif event.event_type == EventType.GRIEVANCE_LOGGED:
+            self.log_grievance(event)
+
+    def create_request(self, event: Event) -> None:
+        """Create a new data subject request."""
         user_id: str = event.payload.get("user_id", "")
         request_type: str = event.payload.get("request_type", "")
-        if not user_id or request_type not in ("access", "correction",
-                                                "erasure"):
+        if not user_id or request_type not in ("access", "correction", "erasure"):
             logger.warning("dsr.request missing or invalid fields")
             return
         request_id = f"dsr_{user_id}_{int(datetime.now(timezone.utc).timestamp())}"
@@ -62,19 +65,27 @@ class DataSubjectRightsService(StatefulService):
                 "request_type": request_type,
                 "status": "pending",
                 "requested_at": now.isoformat(),
-                "due_by":
-                (now + timedelta(days=self.__response_days)).isoformat(),
+                "due_by": (now + timedelta(days=self.__response_days)).isoformat(),
                 "details": event.payload.get("details", ""),
             }
-            self.__sync()
-            self.emit(EventType.DSR_REQUESTED, {
-                "request_id": request_id,
-                "user_id": user_id,
-                "request_type": request_type,
-            },
-                      correlation_id=event.correlation_id)
+            self.repo.save(
+                {
+                    "requests": self.__requests,
+                    "grievances": self.__grievances,
+                }
+            )
+            self.emit(
+                EventType.DSR_REQUESTED,
+                {
+                    "request_id": request_id,
+                    "user_id": user_id,
+                    "request_type": request_type,
+                },
+                correlation_id=event.correlation_id,
+            )
 
-    def _log_grievance(self, event: Event) -> None:
+    def log_grievance(self, event: Event) -> None:
+        """Log a new grievance."""
         user_id: str = event.payload.get("user_id", "")
         subject: str = event.payload.get("subject", "")
         if not user_id or not subject:
@@ -90,70 +101,120 @@ class DataSubjectRightsService(StatefulService):
                 "description": event.payload.get("description", ""),
                 "status": "open",
                 "logged_at": now.isoformat(),
-                "due_by":
-                (now + timedelta(days=self.__grievance_days)).isoformat(),
+                "due_by": (now + timedelta(days=self.__grievance_days)).isoformat(),
             }
-            self.__sync()
+            self.repo.save(
+                {
+                    "requests": self.__requests,
+                    "grievances": self.__grievances,
+                }
+            )
 
     def fulfill_request(self, request_id: str) -> None:
+        """Mark a DSR request as fulfilled.
+
+        Args:
+            request_id: The request identifier.
+        """
         with self.state_lock:
             req = self.__requests.get(request_id)
             if req and req.get("status") == "pending":
                 req["status"] = "fulfilled"
                 req["fulfilled_at"] = datetime.now(timezone.utc).isoformat()
-                self.__sync()
-                self.emit(EventType.DSR_FULFILLED, {
-                    "request_id": request_id,
-                    "user_id": req["user_id"],
-                    "request_type": req["request_type"],
-                })
+                self.repo.save(
+                    {
+                        "requests": self.__requests,
+                        "grievances": self.__grievances,
+                    }
+                )
+                self.emit(
+                    EventType.DSR_FULFILLED,
+                    {
+                        "request_id": request_id,
+                        "user_id": req["user_id"],
+                        "request_type": req["request_type"],
+                    },
+                )
 
     def reject_request(self, request_id: str, reason: str) -> None:
+        """Reject a DSR request with a reason.
+
+        Args:
+            request_id: The request identifier.
+            reason: Reason for rejection.
+        """
         with self.state_lock:
             req = self.__requests.get(request_id)
             if req and req.get("status") == "pending":
                 req["status"] = "rejected"
                 req["rejected_at"] = datetime.now(timezone.utc).isoformat()
                 req["rejection_reason"] = reason
-                self.__sync()
-                self.emit(EventType.DSR_REJECTED, {
-                    "request_id": request_id,
-                    "user_id": req["user_id"],
-                    "request_type": req["request_type"],
-                    "reason": reason,
-                })
+                self.repo.save(
+                    {
+                        "requests": self.__requests,
+                        "grievances": self.__grievances,
+                    }
+                )
+                self.emit(
+                    EventType.DSR_REJECTED,
+                    {
+                        "request_id": request_id,
+                        "user_id": req["user_id"],
+                        "request_type": req["request_type"],
+                        "reason": reason,
+                    },
+                )
 
-    def resolve_grievance(self, grievance_id: str,
-                          resolution: str) -> None:
+    def resolve_grievance(self, grievance_id: str, resolution: str) -> None:
+        """Resolve a grievance with a resolution note.
+
+        Args:
+            grievance_id: The grievance identifier.
+            resolution: Resolution description.
+        """
         with self.state_lock:
             gr = self.__grievances.get(grievance_id)
             if gr and gr.get("status") == "open":
                 gr["status"] = "resolved"
                 gr["resolution"] = resolution
                 gr["resolved_at"] = datetime.now(timezone.utc).isoformat()
-                self.__sync()
-                self.emit(EventType.GRIEVANCE_RESOLVED, {
-                    "grievance_id": grievance_id,
-                    "user_id": gr["user_id"],
-                    "resolution": resolution,
-                })
+                self.repo.save(
+                    {
+                        "requests": self.__requests,
+                        "grievances": self.__grievances,
+                    }
+                )
+                self.emit(
+                    EventType.GRIEVANCE_RESOLVED,
+                    {
+                        "grievance_id": grievance_id,
+                        "user_id": gr["user_id"],
+                        "resolution": resolution,
+                    },
+                )
 
     def get_requests(self, user_id: str) -> list[dict[str, Any]]:
+        """Return all DSR requests for a user.
+
+        Args:
+            user_id: The user identifier.
+
+        Returns:
+            List of request records.
+        """
         with self.state_lock:
-            return [
-                r for r in self.__requests.values()
-                if r.get("user_id") == user_id
-            ]
+            return [r for r in self.__requests.values() if r.get("user_id") == user_id]
 
     def get_grievances(self, user_id: str) -> list[dict[str, Any]]:
+        """Return all grievances for a user.
+
+        Args:
+            user_id: The user identifier.
+
+        Returns:
+            List of grievance records.
+        """
         with self.state_lock:
             return [
-                g for g in self.__grievances.values()
-                if g.get("user_id") == user_id
+                g for g in self.__grievances.values() if g.get("user_id") == user_id
             ]
-
-    def __sync(self) -> None:
-        self._repo.save({
-            "requests": self.__requests,
-            "grievances": self.__grievances,
-        })

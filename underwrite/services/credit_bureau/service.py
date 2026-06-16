@@ -1,4 +1,4 @@
-"""Credit Bureau & CKYC service — pulls credit reports and verifies CKYC.
+"""Credit Bureau & CKYC service - pulls credit reports and verifies CKYC.
 
 Integrates with CIBIL, Experian, Equifax for credit bureau checks and
 the CKYC registry for identity verification per RBI guidelines.
@@ -23,35 +23,43 @@ from underwrite.services.persistence import TypedStoreRepository
 class CreditBureauService(StatefulService):
     """Pulls credit bureau reports and verifies CKYC identity.
 
-    Delegates HTTP calls to the configured *CreditBureauClient*.
-    Caches reports and CKYC responses in-memory with store persistence.
+    Delegates HTTP calls to the configured CreditBureauClient. Caches
+    reports and CKYC responses in-memory with store persistence.
     """
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self._client: CreditBureauClient = self._build_client(**kwargs)
-        self._reports: dict[str, CreditReport] = {}
-        self._ckyc_records: dict[str, dict[str, Any]] = {}
-        self._repo: TypedStoreRepository[dict[str, Any]] = self.store_repo(
-            "credit_bureau", dict)
-        loaded = self._repo.load(default={})
+        self.client: CreditBureauClient = self.build_client(**kwargs)
+        self.reports: dict[str, CreditReport] = {}
+        self.ckyc_records: dict[str, dict[str, Any]] = {}
+        self.repo: TypedStoreRepository[dict[str, Any]] = self.store_repo(
+            "credit_bureau", dict
+        )
+        loaded = self.repo.load(default={})
         if loaded:
-            self._reports = {
-                k: self._dict_to_report(v)
+            self.reports = {
+                k: CreditBureauService.dict_to_report(v)
                 for k, v in loaded.get("reports", {}).items()
             }
-            self._ckyc_records = loaded.get("ckyc", {})
+            self.ckyc_records = loaded.get("ckyc", {})
 
     @staticmethod
-    def _dict_to_report(d: dict[str, Any]) -> CreditReport:
+    def dict_to_report(d: dict[str, Any]) -> CreditReport:
+        """Deserialize a dict to a CreditReport.
+
+        Args:
+            d: Dict representation of a CreditReport.
+
+        Returns:
+            A CreditReport instance.
+        """
         from underwrite.services.credit_bureau.client import (
-            BureauAccount, BureauEnquiry)
-        accounts = [
-            BureauAccount(**a) for a in d.get("accounts", [])
-        ]
-        enquiries = [
-            BureauEnquiry(**e) for e in d.get("enquiries", [])
-        ]
+            BureauAccount,
+            BureauEnquiry,
+        )
+
+        accounts = [BureauAccount(**a) for a in d.get("accounts", [])]
+        enquiries = [BureauEnquiry(**e) for e in d.get("enquiries", [])]
         return CreditReport(
             bureau=d["bureau"],
             pan=d["pan"],
@@ -70,7 +78,16 @@ class CreditBureauService(StatefulService):
             report_date=d.get("report_date", ""),
         )
 
-    def _build_client(self, **kwargs: Any) -> CreditBureauClient:
+    def build_client(self, **kwargs: Any) -> CreditBureauClient:
+        """Build the appropriate credit bureau client based on config.
+
+        Args:
+            **kwargs: Configuration parameters including cibil_api_key.
+
+        Returns:
+            An HttpCreditBureauClient if credentials are available,
+            otherwise a MockCreditBureauClient.
+        """
         api_key = kwargs.get("cibil_api_key", "")
         if api_key:
             return HttpCreditBureauClient(cibil_api_key=api_key)
@@ -78,61 +95,77 @@ class CreditBureauService(StatefulService):
         return MockCreditBureauClient()
 
     def handle(self, event: Event) -> None:
-        if event.event_type == EventType.CREDIT_BUREAU_CHECK:
-            self._check_bureau(event)
-        elif event.event_type == EventType.CKYC_VERIFY:
-            self._verify_ckyc(event)
+        """Process credit bureau and CKYC verification events.
 
-    def _check_bureau(self, event: Event) -> None:
+        Args:
+            event: The incoming domain event.
+        """
+        if event.event_type == EventType.CREDIT_BUREAU_CHECK:
+            self.check_bureau(event)
+        elif event.event_type == EventType.CKYC_VERIFY:
+            self.verify_ckyc(event)
+
+    def check_bureau(self, event: Event) -> None:
+        """Fetch a credit report and emit the result."""
         pan: str = event.payload.get("pan", "")
         bureau: str = event.payload.get("bureau", "cibil")
         if not pan:
             logger.warning("credit_bureau.check missing pan")
             return
         try:
-            report = self._client.fetch_credit_report(pan, bureau)
+            report = self.client.fetch_credit_report(pan, bureau)
         except Exception as exc:
             logger.error("credit_bureau.check failed for %s: %s", pan, exc)
-            self.emit(EventType.CREDIT_BUREAU_CHECK_FAILED, {
-                "pan": pan,
-                "bureau": bureau,
-                "error": str(exc),
-            },
-                      correlation_id=event.correlation_id)
+            self.emit(
+                EventType.CREDIT_BUREAU_CHECK_FAILED,
+                {
+                    "pan": pan,
+                    "bureau": bureau,
+                    "error": str(exc),
+                },
+                correlation_id=event.correlation_id,
+            )
             return
         with self.state_lock:
-            self._reports[pan] = report
-            self._sync()
-        self.emit(EventType.CREDIT_BUREAU_CHECKED, {
-            "pan": pan,
-            "bureau": bureau,
-            "score": report.score,
-            "active_accounts": report.active_accounts,
-            "delinquent_accounts": report.delinquent_accounts,
-            "credit_utilization_pct": report.credit_utilization_pct,
-            "credit_age_years": report.credit_age_years,
-            "total_balance": report.total_balance,
-        },
-                  correlation_id=event.correlation_id)
+            self.reports[pan] = report
+            self.sync()
+        self.emit(
+            EventType.CREDIT_BUREAU_CHECKED,
+            {
+                "pan": pan,
+                "bureau": bureau,
+                "score": report.score,
+                "active_accounts": report.active_accounts,
+                "delinquent_accounts": report.delinquent_accounts,
+                "credit_utilization_pct": report.credit_utilization_pct,
+                "credit_age_years": report.credit_age_years,
+                "total_balance": report.total_balance,
+            },
+            correlation_id=event.correlation_id,
+        )
 
-    def _verify_ckyc(self, event: Event) -> None:
+    def verify_ckyc(self, event: Event) -> None:
+        """Verify CKYC identity and emit the result."""
         ckyc_number: str = event.payload.get("ckyc_number", "")
         aadhaar: str = event.payload.get("aadhaar", "")
         if not ckyc_number or not aadhaar:
             logger.warning("ckyc.verify missing ckyc_number or aadhaar")
             return
         try:
-            response = self._client.verify_ckyc(ckyc_number, aadhaar)
+            response = self.client.verify_ckyc(ckyc_number, aadhaar)
         except Exception as exc:
             logger.error("ckyc.verify failed for %s: %s", ckyc_number, exc)
-            self.emit(EventType.CKYC_REJECTED, {
-                "ckyc_number": ckyc_number,
-                "error": str(exc),
-            },
-                      correlation_id=event.correlation_id)
+            self.emit(
+                EventType.CKYC_REJECTED,
+                {
+                    "ckyc_number": ckyc_number,
+                    "error": str(exc),
+                },
+                correlation_id=event.correlation_id,
+            )
             return
         with self.state_lock:
-            self._ckyc_records[ckyc_number] = {
+            self.ckyc_records[ckyc_number] = {
                 "ckyc_number": response.ckyc_number,
                 "name": response.name,
                 "dob": response.dob,
@@ -143,40 +176,70 @@ class CreditBureauService(StatefulService):
                 "status": response.status,
                 "verified_at": response.verified_at,
             }
-            self._sync()
-        self.emit(EventType.CKYC_VERIFIED, {
-            "ckyc_number": ckyc_number,
-            "name": response.name,
-            "status": response.status,
-        },
-                  correlation_id=event.correlation_id)
+            self.sync()
+        self.emit(
+            EventType.CKYC_VERIFIED,
+            {
+                "ckyc_number": ckyc_number,
+                "name": response.name,
+                "status": response.status,
+            },
+            correlation_id=event.correlation_id,
+        )
 
     def get_report(self, pan: str) -> CreditReport | None:
+        """Return a cached credit report for a PAN.
+
+        Args:
+            pan: The PAN to look up.
+
+        Returns:
+            CreditReport or None.
+        """
         with self.state_lock:
-            return self._reports.get(pan)
+            return self.reports.get(pan)
 
     def get_ckyc(self, ckyc_number: str) -> dict[str, Any] | None:
+        """Return a cached CKYC record.
+
+        Args:
+            ckyc_number: The CKYC number to look up.
+
+        Returns:
+            CKYC record dict or None.
+        """
         with self.state_lock:
-            return self._ckyc_records.get(ckyc_number)
+            return self.ckyc_records.get(ckyc_number)
 
     def health_check(self) -> dict[str, Any]:
+        """Bureau-specific health: reports cached report and CKYC counts."""
         base = super().health_check()
-        base["reports_cached"] = len(self._reports)
-        base["ckyc_records"] = len(self._ckyc_records)
+        base["reports_cached"] = len(self.reports)
+        base["ckyc_records"] = len(self.ckyc_records)
         return base
 
-    def _sync(self) -> None:
+    def sync(self) -> None:
+        """Persist both reports and CKYC records to the store."""
         reports_dict = {
-            k: self._report_to_dict(v)
-            for k, v in self._reports.items()
+            k: CreditBureauService.report_to_dict(v) for k, v in self.reports.items()
         }
-        self._repo.save({
-            "reports": reports_dict,
-            "ckyc": self._ckyc_records,
-        })
+        self.repo.save(
+            {
+                "reports": reports_dict,
+                "ckyc": self.ckyc_records,
+            }
+        )
 
     @staticmethod
-    def _report_to_dict(r: CreditReport) -> dict[str, Any]:
+    def report_to_dict(r: CreditReport) -> dict[str, Any]:
+        """Serialize a CreditReport to a dict.
+
+        Args:
+            r: The CreditReport to serialize.
+
+        Returns:
+            Dict representation suitable for store persistence.
+        """
         return {
             "bureau": r.bureau,
             "pan": r.pan,
@@ -184,26 +247,32 @@ class CreditBureauService(StatefulService):
             "dob": r.dob,
             "score": r.score,
             "score_factors": r.score_factors,
-            "accounts": [{
-                "lender": a.lender,
-                "account_type": a.account_type,
-                "account_number": a.account_number,
-                "opened_date": a.opened_date,
-                "last_reported_date": a.last_reported_date,
-                "current_balance": a.current_balance,
-                "sanction_amount": a.sanction_amount,
-                "emi_amount": a.emi_amount,
-                "days_past_due": a.days_past_due,
-                "status": a.status,
-                "written_off": a.written_off,
-                "settled": a.settled,
-            } for a in r.accounts],
-            "enquiries": [{
-                "lender": e.lender,
-                "date": e.date,
-                "amount": e.amount,
-                "purpose": e.purpose,
-            } for e in r.enquiries],
+            "accounts": [
+                {
+                    "lender": a.lender,
+                    "account_type": a.account_type,
+                    "account_number": a.account_number,
+                    "opened_date": a.opened_date,
+                    "last_reported_date": a.last_reported_date,
+                    "current_balance": a.current_balance,
+                    "sanction_amount": a.sanction_amount,
+                    "emi_amount": a.emi_amount,
+                    "days_past_due": a.days_past_due,
+                    "status": a.status,
+                    "written_off": a.written_off,
+                    "settled": a.settled,
+                }
+                for a in r.accounts
+            ],
+            "enquiries": [
+                {
+                    "lender": e.lender,
+                    "date": e.date,
+                    "amount": e.amount,
+                    "purpose": e.purpose,
+                }
+                for e in r.enquiries
+            ],
             "total_credit_limit": r.total_credit_limit,
             "total_balance": r.total_balance,
             "credit_utilization_pct": r.credit_utilization_pct,

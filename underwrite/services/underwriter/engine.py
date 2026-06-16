@@ -14,6 +14,8 @@ from typing import Any, Callable
 
 
 class RuleCategory(str, Enum):
+    """Categories for underwriting rules."""
+
     CREDIT_SCORE = "credit_score"
     DTI = "dti"
     LTV = "ltv"
@@ -28,6 +30,8 @@ class RuleCategory(str, Enum):
 
 
 class RuleSeverity(str, Enum):
+    """Severity levels for rule violations."""
+
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
@@ -35,6 +39,8 @@ class RuleSeverity(str, Enum):
 
 
 class DecisionOutcome(str, Enum):
+    """Possible outcomes of underwriting evaluation."""
+
     APPROVED = "approved"
     APPROVED_WITH_CONDITIONS = "approved_with_conditions"
     REVIEW = "review"
@@ -64,12 +70,14 @@ class Rule:
         rule_id: Unique rule identifier.
         category: Rule category for grouping.
         field: Fact key to evaluate (dot-notation supported).
-        operator: Comparison operator (gt, gte, lt, lte, eq, neq, in, not_in, between, regex).
+        operator: Comparison operator (gt, gte, lt, lte, eq, neq, in,
+            not_in, between, regex).
         value: Threshold or reference value.
         severity: Impact severity when violated.
         message: Human-readable description.
         enabled: Whether the rule is active.
     """
+
     rule_id: str
     category: str
     field: str
@@ -82,7 +90,20 @@ class Rule:
 
 @dataclass
 class RuleResult:
-    """Result of evaluating a single rule."""
+    """Result of evaluating a single rule.
+
+    Attributes:
+        rule_id: Evaluated rule identifier.
+        category: Rule category.
+        field: Fact field evaluated.
+        operator: Comparison operator used.
+        threshold: Expected value or threshold.
+        actual: Actual value from facts.
+        passed: Whether the rule passed.
+        severity: Severity of the rule.
+        message: Result description.
+    """
+
     rule_id: str
     category: str
     field: str
@@ -101,24 +122,39 @@ class Policy:
     Attributes:
         policy_id: Unique policy identifier.
         description: Human-readable description.
-        rule_ids: List of rule IDs to evaluate.
+        rule_ids: Set of rule IDs to evaluate.
         logic: Logical gate — ``all``, ``any``, ``none``.
         action: Decision outcome if the policy triggers.
         priority: Evaluation priority (lower = evaluated first).
         enabled: Whether the policy is active.
     """
+
     policy_id: str
     description: str
-    rule_ids: list[str]
+    rule_ids: frozenset[str]
     logic: str = "any"
     action: str = "rejected"
     priority: int = 100
     enabled: bool = True
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.rule_ids, frozenset):
+            self.rule_ids = frozenset(self.rule_ids)
+
 
 @dataclass
 class UnderwritingDecision:
-    """Final underwriting decision for an application."""
+    """Final underwriting decision for an application.
+
+    Attributes:
+        application_id: The application identifier.
+        outcome: Decision outcome.
+        reasons: List of reasons for the decision.
+        conditions: List of conditions for conditional approval.
+        rule_results: Results of individual rule evaluations.
+        policy_results: Results of policy evaluations.
+    """
+
     application_id: str
     outcome: str
     reasons: list[str] = field(default_factory=list)
@@ -127,8 +163,16 @@ class UnderwritingDecision:
     policy_results: dict[str, bool] = field(default_factory=dict)
 
 
-def _resolve_field(facts: dict[str, Any], field: str) -> Any:
-    """Resolve a dot-notation field path against facts dict."""
+def resolve_field(facts: dict[str, Any], field: str) -> Any:
+    """Resolve a dot-notation field path against facts dict.
+
+    Args:
+        facts: The facts dictionary.
+        field: Dot-notation field path.
+
+    Returns:
+        The resolved value, or None if not found.
+    """
     parts = field.split(".")
     current: Any = facts
     for part in parts:
@@ -143,6 +187,7 @@ class RuleEngine:
     """Evaluates rules and policies against a set of facts.
 
     Usage::
+
         engine = RuleEngine(rules=[...], policies=[...])
         decision = engine.evaluate("APP-001", facts={...})
     """
@@ -152,24 +197,42 @@ class RuleEngine:
         rules: list[Rule] | None = None,
         policies: list[Policy] | None = None,
     ) -> None:
-        self._rules: dict[str, Rule] = {}
-        self._policies: list[Policy] = []
+        self.rules: dict[str, Rule] = {}
+        self.policies: list[Policy] = []
         if rules:
             for r in rules:
-                self._rules[r.rule_id] = r
+                self.rules[r.rule_id] = r
         if policies:
-            self._policies = sorted(policies, key=lambda p: p.priority)
+            self.policies = sorted(policies, key=lambda p: p.priority)
 
     def add_rule(self, rule: Rule) -> None:
-        self._rules[rule.rule_id] = rule
+        """Add a rule to the engine.
+
+        Args:
+            rule: The rule to add.
+        """
+        self.rules[rule.rule_id] = rule
 
     def add_policy(self, policy: Policy) -> None:
-        self._policies.append(policy)
-        self._policies.sort(key=lambda p: p.priority)
+        """Add a policy to the engine.
 
-    def evaluate_rule(self, rule: Rule, facts: dict[str,
-                                                    Any]) -> RuleResult:
-        actual = _resolve_field(facts, rule.field)
+        Args:
+            policy: The policy to add.
+        """
+        self.policies.append(policy)
+        self.policies.sort(key=lambda p: p.priority)
+
+    def evaluate_rule(self, rule: Rule, facts: dict[str, Any]) -> RuleResult:
+        """Evaluate a single rule against the given facts.
+
+        Args:
+            rule: The rule to evaluate.
+            facts: The facts dictionary.
+
+        Returns:
+            A RuleResult indicating pass/fail.
+        """
+        actual = resolve_field(facts, rule.field)
         op_fn = OPERATORS.get(rule.operator)
         if op_fn is None:
             return RuleResult(
@@ -221,21 +284,29 @@ class RuleEngine:
         application_id: str,
         facts: dict[str, Any],
     ) -> UnderwritingDecision:
+        """Evaluate all rules and policies against facts.
+
+        Args:
+            application_id: The application identifier.
+            facts: The facts dictionary.
+
+        Returns:
+            An UnderwritingDecision with outcome, reasons, and conditions.
+        """
         results: list[RuleResult] = []
-        for rule in self._rules.values():
+        for rule in self.rules.values():
             if not rule.enabled:
                 continue
             results.append(self.evaluate_rule(rule, facts))
 
         policy_results: dict[str, bool] = {}
-        for policy in self._policies:
+        for policy in self.policies:
             if not policy.enabled:
                 continue
-            matched = self._evaluate_policy(policy, results)
+            matched = self.evaluate_policy(policy, results)
             policy_results[policy.policy_id] = matched
 
-        outcome, reasons, conditions = self._resolve_decision(
-            results, policy_results)
+        outcome, reasons, conditions = self.resolve_decision(results, policy_results)
 
         return UnderwritingDecision(
             application_id=application_id,
@@ -246,11 +317,20 @@ class RuleEngine:
             policy_results=policy_results,
         )
 
-    def _evaluate_policy(
+    def evaluate_policy(
         self,
         policy: Policy,
         results: list[RuleResult],
     ) -> bool:
+        """Evaluate a policy against rule results.
+
+        Args:
+            policy: The policy to evaluate.
+            results: List of rule evaluation results.
+
+        Returns:
+            True if the policy gate condition is met.
+        """
         policy_rules = [r for r in results if r.rule_id in policy.rule_ids]
         if policy.logic == "all":
             return all(r.passed for r in policy_rules)
@@ -259,11 +339,20 @@ class RuleEngine:
         else:
             return any(r.passed for r in policy_rules)
 
-    def _resolve_decision(
+    def resolve_decision(
         self,
         results: list[RuleResult],
         policy_results: dict[str, bool],
     ) -> tuple[str, list[str], list[str]]:
+        """Resolve the final decision outcome from rule results.
+
+        Args:
+            results: List of rule evaluation results.
+            policy_results: Results of policy evaluations.
+
+        Returns:
+            Tuple of (outcome, reasons, conditions).
+        """
         failed = [r for r in results if not r.passed]
 
         if not failed:
@@ -272,16 +361,24 @@ class RuleEngine:
         conditions: list[str] = []
         reasons: list[str] = []
 
-        critical = [r for r in failed if r.severity == "critical"]
-        high = [r for r in failed if r.severity == "high"]
-        medium = [r for r in failed if r.severity == "medium"]
-        low = [r for r in failed if r.severity == "low"]
+        critical: list[RuleResult] = []
+        high: list[RuleResult] = []
+        medium: list[RuleResult] = []
+        low: list[RuleResult] = []
+        for r in failed:
+            if r.severity == "critical":
+                critical.append(r)
+            elif r.severity == "high":
+                high.append(r)
+            elif r.severity == "medium":
+                medium.append(r)
+            else:
+                low.append(r)
 
         for r in critical:
             reasons.append(f"[{r.rule_id}] {r.message}")
 
         for r in high:
-            # High violations become conditions if <= 2, else escalate
             if len(high) <= 2:
                 conditions.append(f"[{r.rule_id}] {r.message}")
             else:
@@ -297,7 +394,7 @@ class RuleEngine:
 
         if critical:
             outcome = DecisionOutcome.REJECTED.value
-        elif high and len([r for r in high if not r.passed]) > 2:
+        elif len(high) > 2:
             outcome = DecisionOutcome.ESCALATE.value
         elif high:
             outcome = DecisionOutcome.APPROVED_WITH_CONDITIONS.value

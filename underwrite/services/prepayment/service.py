@@ -25,11 +25,22 @@ from underwrite.validate import get_finite
 class PrepaymentService(NanoService):
     """Computes foreclosure quotes and processes prepayment requests."""
 
+    def handlers(self) -> dict[str, Any]:
+        return {
+            EventType.PREPAYMENT_REQUEST: self.__on_prepayment_request,
+        }
+
     def handle(self, event: Event) -> None:
-        if event.event_type == EventType.PREPAYMENT_REQUEST:
-            self.__on_prepayment_request(event)
+        handler = self.handlers().get(event.event_type)
+        if handler is not None:
+            handler(event)
 
     def __on_prepayment_request(self, event: Event) -> None:
+        """Compute a foreclosure quote for a prepayment request.
+
+        Args:
+            event: The PREPAYMENT_REQUEST event.
+        """
         p = event.payload
         loan_id: str = p.get("loan_id", "")
         if not loan_id:
@@ -75,8 +86,7 @@ class PrepaymentService(NanoService):
                 original_schedule=original_schedule,
             )
         except Exception as exc:
-            logger.error("foreclosure calculation failed for loan %s: %s",
-                         loan_id, exc)
+            logger.error("foreclosure calculation failed for loan %s: %s", loan_id, exc)
             return
 
         self.emit(

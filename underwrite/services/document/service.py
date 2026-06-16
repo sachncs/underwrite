@@ -1,7 +1,7 @@
-"""Document — generates and manages loan document references.
+"""Document - generates and manages loan document references.
 
-Listens for ``underwriter.approved`` events, creates document records,
-and emits ``document.generated``.
+Listens for underwriter.approved events, creates document records,
+and emits document.generated.
 """
 
 from __future__ import annotations
@@ -21,39 +21,45 @@ class DocumentService(StatefulService):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.__documents: dict[str, list[dict[str, Any]]] = {}
-        self._repo: TypedStoreRepository[dict[str, list[dict[
-            str, Any]]]] = self.store_repo("documents", dict)
-        loaded = self._repo.load(default={})
+        self.repo: TypedStoreRepository[dict[str, list[dict[str, Any]]]] = (
+            self.store_repo("documents", dict)
+        )
+        loaded = self.repo.load(default={})
         if loaded:
             self.__documents = loaded
 
     def handle(self, event: Event) -> None:
-        with self.state_lock:
-            if event.event_type != EventType.UNDERWRITER_APPROVED:
-                return
-            p = event.payload
-            borrower: str = get_non_empty(p, "borrower")
-            principal: float = get_finite(p, "principal")
-            doc_id: str = uuid.uuid4().hex
+        """Generate a document record on underwrite approval.
 
-            record = {
-                "doc_id": doc_id,
+        Args:
+            event: The incoming domain event.
+        """
+        if event.event_type != EventType.UNDERWRITER_APPROVED:
+            return
+        p = event.payload
+        borrower: str = get_non_empty(p, "borrower")
+        principal: float = get_finite(p, "principal")
+        doc_id: str = uuid.uuid4().hex
+
+        record = {
+            "doc_id": doc_id,
+            "borrower": borrower,
+            "principal": principal,
+            "status": "generated",
+        }
+        with self.state_lock:
+            self.__documents.setdefault(borrower, []).append(record)
+            self.repo.save(self.__documents)
+
+        self.emit(
+            EventType.DOCUMENT_GENERATED,
+            {
                 "borrower": borrower,
                 "principal": principal,
-                "status": "generated",
-            }
-            self.__documents.setdefault(borrower, []).append(record)
-            self.__sync()
-
-            self.emit(
-                EventType.DOCUMENT_GENERATED,
-                {
-                    "borrower": borrower,
-                    "principal": principal,
-                    "doc_id": doc_id,
-                },
-                correlation_id=event.correlation_id,
-            )
+                "doc_id": doc_id,
+            },
+            correlation_id=event.correlation_id,
+        )
 
     def documents_for(self, borrower: str) -> list[dict[str, Any]]:
         """Retrieve all documents generated for a borrower.
@@ -66,9 +72,3 @@ class DocumentService(StatefulService):
         """
         with self.state_lock:
             return list(self.__documents.get(borrower, []))
-
-    # -- state persistence ---------------------------------------------------
-
-    def __sync(self) -> None:
-        """Persist the current document records to the store."""
-        self._repo.save(self.__documents)

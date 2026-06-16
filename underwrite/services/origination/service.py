@@ -23,49 +23,69 @@ class OriginationService(NanoService):
     def __init__(self, **kwargs: Any) -> None:
         self.__lock: threading.RLock = threading.RLock()
         super().__init__(**kwargs)
+        self.handlers: dict[str, Any] = {
+            EventType.ORIGINATION_CREATE: self.__on_create,
+            EventType.ORIGINATION_SUBMIT: self.__on_submit,
+        }
 
     def handle(self, event: Event) -> None:
-        if event.event_type == EventType.ORIGINATION_CREATE:
-            borrower: str = event.payload.get("borrower", "")
-            principal: float = get_finite(event.payload, "principal", 0.0)
-            if not borrower or principal <= 0:
-                logger.warning(
-                    "dropping ORIGINATION_CREATE with missing borrower or principal"
-                )
-                return
-            application_id: str = f"app_{borrower}_{int(datetime.now(timezone.utc).timestamp())}"
-            app_record = {
+        handler = self.handlers.get(event.event_type)
+        if handler is not None:
+            handler(event)
+
+    def __on_create(self, event: Event) -> None:
+        """Handle an origination create request.
+
+        Args:
+            event: The ORIGINATION_CREATE event.
+        """
+        borrower: str = event.payload.get("borrower", "")
+        principal: float = get_finite(event.payload, "principal", 0.0)
+        if not borrower or principal <= 0:
+            logger.warning(
+                "dropping ORIGINATION_CREATE with missing borrower or principal"
+            )
+            return
+        application_id: str = (
+            f"app_{borrower}_{int(datetime.now(timezone.utc).timestamp())}"
+        )
+        app_record = {
+            "borrower": borrower,
+            "principal": principal,
+            "status": "created",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self.store.set(f"origination:{application_id}", app_record)
+        self.emit(
+            EventType.ORIGINATION_CREATED,
+            {
+                "application_id": application_id,
                 "borrower": borrower,
                 "principal": principal,
-                "status": "created",
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }
-            self.store.set(f"origination:{application_id}", app_record)
-            self.emit(
-                EventType.ORIGINATION_CREATED,
-                {
-                    "application_id": application_id,
-                    "borrower": borrower,
-                    "principal": principal,
-                },
-                correlation_id=event.correlation_id,
-            )
+            },
+            correlation_id=event.correlation_id,
+        )
 
-        elif event.event_type == EventType.ORIGINATION_SUBMIT:
-            application_id = event.payload.get("application_id", "")
-            with self.__lock:
-                record = self.store.get(f"origination:{application_id}")
-                if not record or record.get("status") != "created":
-                    return
-                record["status"] = "submitted"
-                record["submitted_at"] = datetime.now(timezone.utc).isoformat()
-                self.store.set(f"origination:{application_id}", record)
-            self.emit(
-                EventType.ORIGINATION_SUBMITTED,
-                {
-                    "application_id": application_id,
-                    "borrower": record["borrower"],
-                    "principal": record["principal"],
-                },
-                correlation_id=event.correlation_id,
-            )
+    def __on_submit(self, event: Event) -> None:
+        """Handle an origination submit request.
+
+        Args:
+            event: The ORIGINATION_SUBMIT event.
+        """
+        application_id = event.payload.get("application_id", "")
+        with self.__lock:
+            record = self.store.get(f"origination:{application_id}")
+            if not record or record.get("status") != "created":
+                return
+            record["status"] = "submitted"
+            record["submitted_at"] = datetime.now(timezone.utc).isoformat()
+            self.store.set(f"origination:{application_id}", record)
+        self.emit(
+            EventType.ORIGINATION_SUBMITTED,
+            {
+                "application_id": application_id,
+                "borrower": record["borrower"],
+                "principal": record["principal"],
+            },
+            correlation_id=event.correlation_id,
+        )

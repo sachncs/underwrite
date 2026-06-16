@@ -28,6 +28,8 @@ ESCALATION_THRESHOLD: int = 3
 
 
 class RecoveryStage(str, Enum):
+    """Stages of the recovery workflow."""
+
     NEGOTIATION = "negotiation"
     PAYMENT_PLAN = "payment_plan"
     ESCALATION = "escalation"
@@ -43,21 +45,24 @@ class RecoveryService(StatefulService):
     """
 
     def __init__(self, **kwargs: Any) -> None:
-        self.__recovery_rate: float = kwargs.pop("recovery_rate",
-                                                  DEFAULT_RECOVERY_RATE)
-        self.__negotiation_days: int = kwargs.pop("negotiation_days",
-                                                    NEGOTIATION_DAYS)
+        self.__recovery_rate: float = kwargs.pop("recovery_rate", DEFAULT_RECOVERY_RATE)
+        self.__negotiation_days: int = kwargs.pop("negotiation_days", NEGOTIATION_DAYS)
         self.__escalation_threshold: int = kwargs.pop(
-            "escalation_threshold", ESCALATION_THRESHOLD)
+            "escalation_threshold", ESCALATION_THRESHOLD
+        )
         super().__init__(**kwargs)
         self.__recoveries: dict[str, dict[str, Any]] = {}
-        self._repo: TypedStoreRepository[dict[str, dict[str, Any]]] = (
-            self.store_repo("recoveries", dict))
-        loaded = self._repo.load(default={})
+        self.repo: TypedStoreRepository[dict[str, dict[str, Any]]] = self.store_repo(
+            "recoveries", dict
+        )
+        loaded = self.repo.load(default={})
         if loaded:
             self.__recoveries = loaded
-            active = sum(1 for r in self.__recoveries.values()
-                         if r.get("stage") != RecoveryStage.SETTLEMENT.value)
+            active = sum(
+                1
+                for r in self.__recoveries.values()
+                if r.get("stage") != RecoveryStage.SETTLEMENT.value
+            )
             if active > 0:
                 logger.info(
                     "loaded %d active recovery(s) from store",
@@ -65,6 +70,11 @@ class RecoveryService(StatefulService):
                 )
 
     def handle(self, event: Event) -> None:
+        """Process events that drive the recovery workflow.
+
+        Args:
+            event: The incoming domain event.
+        """
         if event.event_type == EventType.DEFAULT_OCCURRED:
             self.__start_recovery(event)
         elif event.event_type == EventType.PAYMENT_RECEIVED:
@@ -73,13 +83,17 @@ class RecoveryService(StatefulService):
             self.__on_offer_response(event)
 
     def __start_recovery(self, event: Event) -> None:
+        """Start a new recovery workflow for a defaulted borrower.
+
+        Args:
+            event: The DEFAULT_OCCURRED event.
+        """
         borrower: str = get_non_empty(event.payload, "borrower")
         principal: float = get_finite(event.payload, "principal")
 
         with self.state_lock:
             if borrower in self.__recoveries:
-                logger.warning(
-                    "recovery already active for %s, skipping", borrower)
+                logger.warning("recovery already active for %s, skipping", borrower)
                 return
 
             recovery: dict[str, Any] = {
@@ -95,8 +109,7 @@ class RecoveryService(StatefulService):
             self.__recoveries[borrower] = recovery
             self.__sync()
 
-        logger.info("recovery started for %s (principal=%.2f)", borrower,
-                    principal)
+        logger.info("recovery started for %s (principal=%.2f)", borrower, principal)
         self.emit(
             EventType.RECOVERY_STARTED,
             {
@@ -119,14 +132,20 @@ class RecoveryService(StatefulService):
             {
                 "borrower": borrower,
                 "offer_amount": offer_amount,
-                "due_by": (datetime.now(timezone.utc) +
-                           timedelta(days=self.__negotiation_days)).isoformat(),
+                "due_by": (
+                    datetime.now(timezone.utc) + timedelta(days=self.__negotiation_days)
+                ).isoformat(),
                 "stage": RecoveryStage.NEGOTIATION.value,
             },
             correlation_id=event.correlation_id,
         )
 
     def __on_offer_response(self, event: Event) -> None:
+        """Handle a borrower's response to a recovery offer.
+
+        Args:
+            event: The recovery.offer_response event.
+        """
         borrower: str = get_non_empty(event.payload, "borrower")
         accepted: bool = event.payload.get("accepted", False)
 
@@ -135,15 +154,14 @@ class RecoveryService(StatefulService):
             if not recovery:
                 return
             if recovery["stage"] in (
-                    RecoveryStage.ESCALATION.value,
-                    RecoveryStage.SETTLEMENT.value,
+                RecoveryStage.ESCALATION.value,
+                RecoveryStage.SETTLEMENT.value,
             ):
                 return
 
             if accepted:
                 recovery["stage"] = RecoveryStage.PAYMENT_PLAN.value
-                recovery["last_action"] = datetime.now(
-                    timezone.utc).isoformat()
+                recovery["last_action"] = datetime.now(timezone.utc).isoformat()
                 self.__sync()
                 logger.info("recovery offer accepted for %s", borrower)
                 self.emit(
@@ -160,8 +178,7 @@ class RecoveryService(StatefulService):
                 recovery["offer_count"] += 1
                 if recovery["offer_count"] >= self.__escalation_threshold:
                     recovery["stage"] = RecoveryStage.ESCALATION.value
-                    recovery["last_action"] = datetime.now(
-                        timezone.utc).isoformat()
+                    recovery["last_action"] = datetime.now(timezone.utc).isoformat()
                     self.__sync()
                     logger.warning("recovery escalated for %s", borrower)
                     self.emit(
@@ -174,8 +191,7 @@ class RecoveryService(StatefulService):
                         correlation_id=event.correlation_id,
                     )
                 else:
-                    recovery["last_action"] = datetime.now(
-                        timezone.utc).isoformat()
+                    recovery["last_action"] = datetime.now(timezone.utc).isoformat()
                     self.__sync()
                     offer_amount = recovery["principal"] * self.__recovery_rate
                     self.emit(
@@ -184,8 +200,8 @@ class RecoveryService(StatefulService):
                             "borrower": borrower,
                             "offer_amount": offer_amount,
                             "due_by": (
-                                datetime.now(timezone.utc) +
-                                timedelta(days=self.__negotiation_days)
+                                datetime.now(timezone.utc)
+                                + timedelta(days=self.__negotiation_days)
                             ).isoformat(),
                             "stage": RecoveryStage.NEGOTIATION.value,
                         },
@@ -193,6 +209,11 @@ class RecoveryService(StatefulService):
                     )
 
     def __on_payment_received(self, event: Event) -> None:
+        """Track a payment received during recovery.
+
+        Args:
+            event: The PAYMENT_RECEIVED event.
+        """
         borrower: str = get_non_empty(event.payload, "borrower")
         amount: float = get_finite(event.payload, "amount")
 
@@ -204,8 +225,7 @@ class RecoveryService(StatefulService):
                 return
 
             recovery["recovered"] += amount
-            recovery["last_action"] = datetime.now(
-                timezone.utc).isoformat()
+            recovery["last_action"] = datetime.now(timezone.utc).isoformat()
             outstanding: float = recovery["principal"] - recovery["recovered"]
 
             if outstanding <= 0:
@@ -213,7 +233,8 @@ class RecoveryService(StatefulService):
                 self.__sync()
                 logger.info(
                     "recovery completed for %s (recovered=%.2f)",
-                    borrower, recovery["recovered"],
+                    borrower,
+                    recovery["recovered"],
                 )
                 self.emit(
                     EventType.RECOVERY_COMPLETED,
@@ -228,9 +249,11 @@ class RecoveryService(StatefulService):
             else:
                 self.__sync()
                 logger.info(
-                    "recovery progress for %s: recovered=%.2f "
-                    "outstanding=%.2f", borrower, recovery["recovered"],
-                    outstanding)
+                    "recovery progress for %s: recovered=%.2f outstanding=%.2f",
+                    borrower,
+                    recovery["recovered"],
+                    outstanding,
+                )
                 self.emit(
                     "recovery.progress",
                     {
@@ -243,18 +266,34 @@ class RecoveryService(StatefulService):
                 )
 
     def get_recovery(self, borrower: str) -> dict[str, Any] | None:
+        """Return the current recovery record for a borrower.
+
+        Args:
+            borrower: The borrower identifier.
+
+        Returns:
+            Recovery dict or None if not found.
+        """
         with self.state_lock:
             return self.__recoveries.get(borrower)
 
     def health_check(self) -> dict[str, Any]:
+        """Return health metrics including recovery counts.
+
+        Returns:
+            Dict with base health info plus recovery stats.
+        """
         base = super().health_check()
         with self.state_lock:
             active = sum(
-                1 for r in self.__recoveries.values()
-                if r.get("stage") != RecoveryStage.SETTLEMENT.value)
+                1
+                for r in self.__recoveries.values()
+                if r.get("stage") != RecoveryStage.SETTLEMENT.value
+            )
             base["active_recoveries"] = active
             base["total_recoveries"] = len(self.__recoveries)
         return base
 
     def __sync(self) -> None:
-        self._repo.save(self.__recoveries)
+        """Persist recoveries to the store."""
+        self.repo.save(self.__recoveries)

@@ -1,4 +1,4 @@
-"""Compliance — RBI-compliant KYC/AML checks for Indian fintech.
+"""Compliance - RBI-compliant KYC/AML checks for Indian fintech.
 
 Verifies PAN (format + category), Aadhaar (Verhoeff check digit),
 screens against AML blocklists with risk scoring, and emits CKYC
@@ -58,22 +58,6 @@ AML_RISK_WEIGHTS: dict[str, int] = {
 AML_LOW_THRESHOLD: int = 3
 AML_MEDIUM_THRESHOLD: int = 7
 
-
-def _load_blocklist(path: str) -> set[str]:
-    p = Path(path)
-    if not p.exists():
-        return set()
-    try:
-        with open(p) as fh:
-            data = json.load(fh)
-        if isinstance(data, list):
-            return {entry.strip().lower() for entry in data if entry}
-        logger.warning("aml_blocklist must be a JSON list, got %s", type(data))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("failed to load AML blocklist %s: %s", path, exc)
-    return set()
-
-
 VERHOEFF_D: tuple[tuple[int, ...], ...] = (
     (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
     (1, 2, 3, 4, 0, 6, 7, 8, 9, 5),
@@ -101,8 +85,39 @@ VERHOEFF_P: tuple[tuple[int, ...], ...] = (
 VERHOEFF_INV: tuple[int, ...] = (0, 4, 3, 2, 1, 5, 6, 7, 8, 9)
 
 
-def _verify_aadhaar_checksum(aadhaar: str) -> bool:
-    if not re.match(AADHAAR_PATTERN, aadhaar):
+def load_blocklist(path: str) -> set[str]:
+    """Load AML blocklist from a JSON file.
+
+    Args:
+        path: Path to the JSON blocklist file.
+
+    Returns:
+        Set of lowercased blocked entry strings.
+    """
+    p = Path(path)
+    if not p.exists():
+        return set()
+    try:
+        with open(p) as fh:
+            data = json.load(fh)
+        if isinstance(data, list):
+            return {entry.strip().lower() for entry in data if entry}
+        logger.warning("aml_blocklist must be a JSON list, got %s", type(data))
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("failed to load AML blocklist %s: %s", path, exc)
+    return set()
+
+
+def verify_aadhaar_checksum(aadhaar: str) -> bool:
+    """Verify an Aadhaar number using the Verhoeff checksum algorithm.
+
+    Args:
+        aadhaar: 12-digit Aadhaar number as a string.
+
+    Returns:
+        True if the checksum is valid, False otherwise.
+    """
+    if not aadhaar or len(aadhaar) != 12 or not aadhaar.isdigit():
         return False
     c = 0
     digits = [int(d) for d in aadhaar]
@@ -111,7 +126,17 @@ def _verify_aadhaar_checksum(aadhaar: str) -> bool:
     return c == 0
 
 
-def _pans_category(pan: str) -> str:
+def pan_category(pan: str) -> str:
+    """Return the PAN category label based on the 4th character.
+
+    Args:
+        pan: 10-character PAN string.
+
+    Returns:
+        Category label or 'Unknown'.
+    """
+    if not pan or len(pan) < 4:
+        return "Unknown"
     code = pan[3]
     return PAN_CATEGORIES.get(code, "Unknown")
 
@@ -121,60 +146,83 @@ class ComplianceService(StatefulService):
 
     def __init__(self, **kwargs: Any) -> None:
         self.__aml_blocklist_path: str = kwargs.pop(
-            "aml_blocklist_path", os.environ.get("AML_BLOCKLIST_PATH", BLOCKLIST_PATH))
+            "aml_blocklist_path",
+            os.environ.get("AML_BLOCKLIST_PATH", BLOCKLIST_PATH),
+        )
         super().__init__(**kwargs)
-        self.__blocklist: set[str] = _load_blocklist(self.__aml_blocklist_path)
+        self.__blocklist: set[str] = load_blocklist(self.__aml_blocklist_path)
         self.__kyc_records: dict[str, dict[str, Any]] = {}
-        self._repo: TypedStoreRepository[dict[str, Any]] = self.store_repo("compliance", dict)
-        loaded = self._repo.load(default={})
+        self.repo: TypedStoreRepository[dict[str, Any]] = self.store_repo(
+            "compliance", dict
+        )
+        loaded = self.repo.load(default={})
         if loaded:
             self.__kyc_records = loaded.get("kyc_records", {})
 
     def handle(self, event: Event) -> None:
-        if event.event_type == EventType.USER_ADDED:
-            self._on_user_added(event)
-        elif event.event_type == EventType.CKYC_VERIFIED:
-            self._on_ckyc_verified(event)
-        elif event.event_type == "kyc.video_verified":
-            self._on_video_kyc_done(event)
+        """Process KYC and compliance events.
 
-    def _on_user_added(self, event: Event) -> None:
+        Args:
+            event: The incoming domain event. Processes USER_ADDED,
+                CKYC_VERIFIED, and kyc.video_verified.
+        """
+        if event.event_type == EventType.USER_ADDED:
+            self.on_user_added(event)
+        elif event.event_type == EventType.CKYC_VERIFIED:
+            self.on_ckyc_verified(event)
+        elif event.event_type == "kyc.video_verified":
+            self.on_video_kyc_done(event)
+
+    def on_user_added(self, event: Event) -> None:
+        """Process a new user: verify PAN, Aadhaar, run AML screening."""
         user: str = event.payload.get("user", "")
         pan: str = event.payload.get("pan", "").upper()
         aadhaar: str = event.payload.get("aadhaar", "")
         name: str = event.payload.get("name", user)
         consent_id: str = event.payload.get("consent_id", "")
 
-        if consent_id and not self._check_consent(user, consent_id):
-            self.emit(EventType.KYC_REJECTED, {
-                "user": user,
-                "kyc_status": "rejected",
-                "reason": "consent_not_given",
-            }, correlation_id=event.correlation_id)
+        if consent_id and not self.check_consent(user, consent_id):
+            self.emit(
+                EventType.KYC_REJECTED,
+                {
+                    "user": user,
+                    "kyc_status": "rejected",
+                    "reason": "consent_not_given",
+                },
+                correlation_id=event.correlation_id,
+            )
             return
 
         if not re.match(PAN_PATTERN, pan):
-            self.emit(EventType.KYC_REJECTED, {
-                "user": user,
-                "kyc_status": "rejected",
-                "reason": "invalid_pan_format",
-            }, correlation_id=event.correlation_id)
+            self.emit(
+                EventType.KYC_REJECTED,
+                {
+                    "user": user,
+                    "kyc_status": "rejected",
+                    "reason": "invalid_pan_format",
+                },
+                correlation_id=event.correlation_id,
+            )
             return
 
-        pan_category = _pans_category(pan)
+        pan_cat = pan_category(pan)
 
-        if not _verify_aadhaar_checksum(aadhaar):
-            self.emit(EventType.KYC_REJECTED, {
-                "user": user,
-                "kyc_status": "rejected",
-                "reason": "invalid_aadhaar_checksum",
-            }, correlation_id=event.correlation_id)
+        if not verify_aadhaar_checksum(aadhaar):
+            self.emit(
+                EventType.KYC_REJECTED,
+                {
+                    "user": user,
+                    "kyc_status": "rejected",
+                    "reason": "invalid_aadhaar_checksum",
+                },
+                correlation_id=event.correlation_id,
+            )
             return
 
         kyc_data: dict[str, Any] = {
             "user": user,
             "pan": pan,
-            "pan_category": pan_category,
+            "pan_category": pan_cat,
             "aadhaar": aadhaar[-4:],
             "aadhaar_verified": True,
             "name": name,
@@ -186,94 +234,149 @@ class ComplianceService(StatefulService):
 
         with self.state_lock:
             self.__kyc_records[user] = kyc_data
-            self.__sync()
+            self.repo.save({"kyc_records": self.__kyc_records})
 
-        self.emit(EventType.KYC_VERIFIED, {
-            "user": user,
-            "kyc_status": "format_verified",
-            "pan_category": pan_category,
-            "aadhaar_last4": aadhaar[-4:],
-        }, correlation_id=event.correlation_id)
-
-        self.emit(EventType.CKYC_VERIFY, {
-            "user": user,
-            "ckyc_number": event.payload.get("ckyc_number", ""),
-            "aadhaar": aadhaar,
-            "pan": pan,
-            "name": name,
-        }, correlation_id=event.correlation_id)
-
-        risk_score = self.__screen(name, user, event)
-        if risk_score >= AML_MEDIUM_THRESHOLD:
-            self.emit(EventType.AML_FROZEN, {
+        self.emit(
+            EventType.KYC_VERIFIED,
+            {
                 "user": user,
-                "aml_status": "frozen",
-                "risk_score": risk_score,
-                "reason": "high_risk_aml_screening",
-            }, correlation_id=event.correlation_id)
+                "kyc_status": "format_verified",
+                "pan_category": pan_cat,
+                "aadhaar_last4": aadhaar[-4:],
+            },
+            correlation_id=event.correlation_id,
+        )
+
+        self.emit(
+            EventType.CKYC_VERIFY,
+            {
+                "user": user,
+                "ckyc_number": event.payload.get("ckyc_number", ""),
+                "aadhaar": aadhaar,
+                "pan": pan,
+                "name": name,
+            },
+            correlation_id=event.correlation_id,
+        )
+
+        risk_score = self.__screen(name, user)
+        self.apply_aml_result(user, risk_score, event)
+
+        self.emit(
+            "kyc.video_initiated",
+            {
+                "user": user,
+                "video_kyc_status": "pending",
+            },
+            correlation_id=event.correlation_id,
+        )
+
+    def apply_aml_result(self, user: str, risk_score: int, event: Event) -> None:
+        """Apply AML screening result and emit appropriate events."""
+        if risk_score >= AML_MEDIUM_THRESHOLD:
+            self.emit(
+                EventType.AML_FROZEN,
+                {
+                    "user": user,
+                    "aml_status": "frozen",
+                    "risk_score": risk_score,
+                    "reason": "high_risk_aml_screening",
+                },
+                correlation_id=event.correlation_id,
+            )
             with self.state_lock:
                 if user in self.__kyc_records:
                     self.__kyc_records[user]["aml_status"] = "frozen"
                     self.__kyc_records[user]["aml_risk_score"] = risk_score
-                    self.__sync()
+                    self.repo.save({"kyc_records": self.__kyc_records})
         elif risk_score >= AML_LOW_THRESHOLD:
-            self.emit("aml.flagged", {
-                "user": user,
-                "aml_status": "flagged",
-                "risk_score": risk_score,
-                "reason": "medium_risk_aml_screening",
-            }, correlation_id=event.correlation_id)
+            self.emit(
+                "aml.flagged",
+                {
+                    "user": user,
+                    "aml_status": "flagged",
+                    "risk_score": risk_score,
+                    "reason": "medium_risk_aml_screening",
+                },
+                correlation_id=event.correlation_id,
+            )
             with self.state_lock:
                 if user in self.__kyc_records:
                     self.__kyc_records[user]["aml_status"] = "flagged"
                     self.__kyc_records[user]["aml_risk_score"] = risk_score
-                    self.__sync()
-            self.emit(EventType.AML_CLEARED, {
-                "user": user,
-                "aml_status": "flagged_review",
-            }, correlation_id=event.correlation_id)
+                    self.repo.save({"kyc_records": self.__kyc_records})
+            self.emit(
+                EventType.AML_CLEARED,
+                {
+                    "user": user,
+                    "aml_status": "flagged_review",
+                },
+                correlation_id=event.correlation_id,
+            )
         else:
-            self.emit(EventType.AML_CLEARED, {
-                "user": user,
-                "aml_status": "clear",
-            }, correlation_id=event.correlation_id)
+            self.emit(
+                EventType.AML_CLEARED,
+                {
+                    "user": user,
+                    "aml_status": "clear",
+                },
+                correlation_id=event.correlation_id,
+            )
             with self.state_lock:
                 if user in self.__kyc_records:
                     self.__kyc_records[user]["aml_status"] = "clear"
-                    self.__sync()
+                    self.repo.save({"kyc_records": self.__kyc_records})
 
-        self.emit("kyc.video_initiated", {
-            "user": user,
-            "video_kyc_status": "pending",
-        }, correlation_id=event.correlation_id)
-
-    def _on_ckyc_verified(self, event: Event) -> None:
+    def on_ckyc_verified(self, event: Event) -> None:
+        """Update CKYC verification status."""
         user: str = event.payload.get("user", "")
         status: str = event.payload.get("status", "")
         with self.state_lock:
             if user in self.__kyc_records:
                 self.__kyc_records[user]["ckyc_status"] = status
-                self.__sync()
+                self.repo.save({"kyc_records": self.__kyc_records})
 
-    def _on_video_kyc_done(self, event: Event) -> None:
+    def on_video_kyc_done(self, event: Event) -> None:
+        """Update video KYC status."""
         user: str = event.payload.get("user", "")
         status: str = event.payload.get("status", "")
         with self.state_lock:
             if user in self.__kyc_records:
                 self.__kyc_records[user]["video_kyc_status"] = status
-                self.__sync()
+                self.repo.save({"kyc_records": self.__kyc_records})
 
-    def _check_consent(self, user: str, consent_id: str) -> bool:
+    @staticmethod
+    def check_consent(user: str, consent_id: str) -> bool:
+        """Check if user has provided valid consent.
+
+        Args:
+            user: The user identifier.
+            consent_id: The consent reference identifier.
+
+        Returns:
+            True if consent is valid.
+        """
         return bool(consent_id)
 
-    def __screen(self, name: str, user: str, event: Event) -> int:
+    def __screen(self, name: str, user: str) -> int:
+        """Screen a user against the AML blocklist and keyword weights.
+
+        Args:
+            name: The user's full name.
+            user: The user identifier.
+
+        Returns:
+            Integer risk score (higher = higher risk).
+        """
         name_lower: str = name.lower().strip()
         user_lower: str = user.lower().strip()
         risk_score: int = 0
 
-        for blocked in self.__blocklist:
-            if blocked in name_lower or blocked in user_lower:
-                risk_score += 8
+        if self.__blocklist and any(
+            blocked in name_lower or blocked in user_lower
+            for blocked in self.__blocklist
+        ):
+            risk_score += 8
 
         text = f"{name_lower} {user_lower}"
         for keyword, weight in AML_RISK_WEIGHTS.items():
@@ -283,14 +386,20 @@ class ComplianceService(StatefulService):
         return risk_score
 
     def get_kyc_status(self, user: str) -> dict[str, Any] | None:
+        """Return the KYC status for a user.
+
+        Args:
+            user: The user identifier.
+
+        Returns:
+            KYC record dict or None if not found.
+        """
         with self.state_lock:
             return self.__kyc_records.get(user)
 
     def health_check(self) -> dict[str, Any]:
+        """Compliance-specific health: reports blocklist and KYC counts."""
         base = super().health_check()
         base["aml_blocklist_entries"] = len(self.__blocklist)
         base["kyc_records"] = len(self.__kyc_records)
         return base
-
-    def __sync(self) -> None:
-        self._repo.save({"kyc_records": self.__kyc_records})
