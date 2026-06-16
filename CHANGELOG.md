@@ -2,149 +2,302 @@
 
 All notable changes to this project are documented here.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+> **WARNING**: This is a beta project. Not production-ready. Not developer-friendly.
+> Known gaps: no real PAN/Aadhaar/CIBIL API integrations (format validation only),
+> no video KYC, no e-NACH, incomplete RBAC, no DR procedures, rough DX.
 
 ## [Unreleased]
 
 ### Added
-- Comprehensive 37-page documentation site under `docs/` — architecture, system design, domain model, API reference, deployment, operations, security, troubleshooting, and more
-- `setup.sh` — production-quality, idempotent environment bootstrap script (venv, deps, pre-commit, validation)
-- `lint.sh`, `test.sh`, `format.sh` — standalone companion scripts
-- `cleanup.sh` — removes all build/test artifacts
-- CI security scanning — `bandit` static analysis and `pip-audit` dependency auditing in GitHub Actions
-- Docker build + smoke test job in CI pipeline
-- Per-saga locking in `SagaOrchestrator` — different sagas execute concurrently instead of blocking on a global lock
-- Concurrent handler dispatch — `NanoService` now supports `ThreadPoolExecutor` via `max_concurrent` parameter
-- Window-slot distributed rate limiter — replaces TOCTOU `get()`/`set()` with time-window key pattern
-- Postgres testcontainer fixtures, HTTP `TestClient` fixture, and failure-mock fixtures (`FailAfterCountStore`, `InjectingBus`) in `conftest.py`
-- `UNDERWRITE_ALLOW_JOBLIB` env var to gate `joblib.load()` deserialization
-- `RISK_MODEL_SHA256` verification enforced on risk model files
-- `bus` property on `NanoService` for downstream idempotency access
-- Real bus health check — validates bus isn't stopped, reports subscriber count + DLQ depth
-- Notification channel dispatch — SES email + Twilio SMS via `ThreadPoolExecutor`
-- `principal` field in `DEFAULT_OCCURRED` payload for recovery workflow
+- SQS distributed event bus backend (`__bus_sqs__.py`, 172 lines)
+- Modal distributed event bus backend (`__bus_modal__.py`, 141 lines)
+- DPDPA 2023 compliance config: `ConsentConfig`, `DsrConfig`, `DpdpaConfig` with consent validity, DSR response SLA, breach notification timer, data retention periods
+- `NpaConfig` with SMA-0/1/2 thresholds, provisioning rates per RBI IRAC norms
+- `UnderwritingConfig` with credit score floor, DTI cap, LTV cap, min/max principal, tenor
+- `CreditBureauConfig` for CIBIL/Experian/Equifax + CKYC API keys and endpoints
+- `KfsConfig` for Key Fact Statement cooling-off period per RBI DLG
+- `RazorpayConfig` for payment gateway integration (UPI Autopay, e-NACH)
+- Missing SERVICE_NAMES entries: `consent`, `dsr`, `credit_bureau`, `kfs`
+- WIRING entries for `aml.flagged`, `kyc.video_initiated`, `kyc.video_verified`, `pricing.penal_interest`, `pricing.foreclosure`, `recovery.offer`, `recovery.escalated`, `recovery.progress`
+- AML blocklist path (`AML_BLOCKLIST_PATH`) env var support
+- Per-product RBI pricing cap env vars (`UNDERWRITE_PERSONAL_LOAN_RATE_CAP`, `UNDERWRITE_MICRO_LOAN_RATE_CAP`, `UNDERWRITE_PENAL_INTEREST_CAP`, `UNDERWRITE_COOLING_OFF_DAYS`)
+- Credit bureau / CKYC / Razorpay / DPDPA env vars
+- AML env vars (`AML_BLOCKLIST_PATH`, `AML_THRESHOLD_LOW`, `AML_THRESHOLD_FROZEN`)
+- `UNDERWRITE_SQS_QUEUE_URL`, `UNDERWRITE_SQS_REGION`, `UNDERWRITE_MODAL_QUEUE_NAME` env vars
+- KFS env vars (`UNDERWRITE_KFS_COOLING_OFF_DAYS`, `UNDERWRITE_KFS_DISCLOSURE_VERSION`)
+- 9 Indian-market docs updated (ENVIRONMENT_VARIABLES, CONFIGURATION, DOMAIN_MODEL, SECURITY, QUICKSTART, API, DEPLOYMENT, ROADMAP, OPERATIONS)
+- Honest README.md with beta warning and known gaps documented
 
 ### Changed
-- PostgresStore pool replaced hand-rolled list+lock with `psycopg2.pool.ThreadedConnectionPool`
-- Sagas use per-saga `RLock` instead of global `RLock`
-- Each migration version wraps in its own transaction with commit/rollback
-- `MechanismService.__persist_or_rollback` keeps `state_lock` held during store write
-- `OtlpSpanExporter` lazily initializes SDK once at construction time
-- `document/service.py` uses `uuid.uuid4().hex` instead of `str(uuid.uuid4())[:8]`
-- Fee payment check moved entirely inside `state_lock`
-- `PostgresStore._get_pool()` lazy-connects on first use
-- Risk model loads via JSON by default; joblib requires `UNDERWRITE_ALLOW_JOBLIB=true`
-- `pyproject.toml` updated to write `__version__.py` instead of `_version.py`
+- **Compliance service** — from basic PAN/Aadhaar regex to PAN category detection, Aadhaar Verhoeff checksum, weighted keyword AML risk scoring (low/flagged/frozen), CKYC event emission, video KYC lifecycle hooks, consent pre-check
+- **Pricing service** — from generic rate computation to RBI-compliant: per-product rate caps (home 12%, gold 18%, personal 28%, micro 30%), all-in-cost APR, penal interest cap (24%), foreclosure charge computation, EMI amortization, DTI calculation, GST disclosure
+- **Recovery service** — from in-memory-only (state lost on restart) to store-backed persistence via TypedStoreRepository with duplicate default detection
+- **__config__.py** — added `kfs`, `npa`, `dpdpa`, `razorpay`, `credit_bureau`, `underwriting` config sections; refactored SERVICE_NAMES to include consent, dsr, credit_bureau, kfs
+- **__service_registry__.py** — wiring updated for new compliance/pricing/recovery event names
+- **docker-compose.yml** — from filesystem-only to Postgres 16 + Vault + OTLP collector
+- **Base service** — refactored `StatefulService` store_repo/batched_repo factory methods
+- **PostgresStore** — migration engine uses lock_timeout and statement_timeout for safety
+- `UNDERWRITE_AUDIT_EXPORT_URL` env var added for audit log offloading
+- PII redaction — Aadhaar-like 12-digit and PAN-like patterns redacted in logs and audit
 
 ### Fixed
-- Event signature forgery — removed `json.dumps(default=str)` from signing paths; non-JSON payloads are now correctly rejected
-- Silent data loss — `StoreRepository.save()` no longer swallows `Exception`
-- Dispatch crash — `NanoService.__dispatch` no longer re-raises after logging; DLQ handles redelivery
-- Double disbursement — idempotency guard in `disbursement/service.py`
-- Concurrent mutation loss — state lock held across store write
-- Root container — `addgroup`/`adduser` + `USER underwrite` in Dockerfile
-- Port mismatch — `docker-compose.yml` port changed to `8000:8080`
-- No restart policy — added `restart: unless-stopped`
-- Health no-op — bus health now validates bus state
-- UUID collision — full 32-char hex UUID instead of 8-char prefix
-- Zero recovery — `MechanismService.__default` includes `principal` and reads from graph
-- Phantom payments — idempotency guard in servicing `REPAID` handler
-- `ServicingService.handle()` references `self.bus` via property instead of name-mangled private attribute
-- Missing `logger` import in `disbursement/service.py`
+- `UNDERWRITE_RECOVERY_BACKOFF` env var now correctly maps to `recovery.backoff_seconds`
+- `communication` service test isolation — removed flaky shared state dependency
+- `UNDERWRITE_SECRETS_AWS_REGION` accepts empty string for fallback to env default
+- `__secrets__` backend fallback ordering — Vault/AWS not tried when `backend=env`
+- Vault `KVv2` secret path handling — mounts at correct engine path
+- Fixed broken `docs/ARCHITECTURE.md` link in README (should be `architecture.md`)
+
+### Added Tests
+- 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries
+- 202-line recovery test suite: start/offer/accept/reject, escalation, partial/full payment, completion, store persistence, duplicate dedup
+- Multi-saga concurrency tests — parallel saga execution with per-saga locks
+- Notification channel dispatch tests (SES/Twilio)
+- PII redaction edge-case tests (Aadhaar/PAN patterns)
+- Circuit breaker open/half-open/close state transitions
+
+### Removed
+- `underwrite/version.py` (manual) — replaced by setuptools-scm auto-generated `__version__.py`
+- `docs/api-reference.md`, `docs/getting-started.md`, `docs/index.md` — consolidated into docs/
+- `TODO.md` — replaced by `docs/ROADMAP.md` and GitHub Issues
+- `.pre-commit-config.yaml` (pre-commit hooks removed from repo)
+- Flaky `test_communication.py` tests — removed 12 dead/duplicate test cases
+- Misleading "Production-hardened" and "828+ tests" claims in README
 
 ### Security
-- Ed25519 signature verification enforced on all events — `default=str` removed from signing
-- Risk model integrity — SHA-256 verification via env var or sidecar; joblib gated behind explicit opt-in
-- Bandit SAST scanning in CI pipeline
-- `pip-audit` dependency vulnerability scanning in CI
+- PII redaction — Aadhaar (12-digit), PAN, Voter ID, passport, bank account patterns masked in logs
 
 ---
 
-## [0.4.0] — 2026-06-07
+## [0.6.2] — 2026-06-16
 
 ### Added
-- `AsyncLocalBus` — async event bus with per-handler timeouts (30s), dead-letter routing, and CancelledError handling
-- `__schema__.py` — schema management for state store migrations
-- `__plugins__.py` — plugin discovery and loading framework
-- `_version.py` — auto-generated version module via setuptools-scm
-- `bandit` configuration for security SAST
-- `Dockerfile` — production container image
-- `docker-compose.yml` — multi-service orchestration with restart policy
-- `CHANGELOG.md` — project changelog
-- `conftest.py` — shared test fixtures (Postgres, TestClient, mock stores/buses)
-- `test_error_paths.py` — comprehensive error-path and boundary testing
-- New service modules: notification (SES/Twilio dispatch), document (generation), governance (rules engine)
-
-### Changed
-- Migrated from `bandit` config file (`.bandit`) to `pyproject.toml` integration
-- `__config__.py` major refactor — consolidated 600+ line config into `ServiceConfig`-driven model
-- `__runtime__.py` — startup/shutdown lifecycle with configurable timeout
-- `__cli__.py` — added `serve`, `migrate` commands; streamlined `identity` and `health`
-- Store backends — `PostgresStore` lazy initialization on first connection
-- Service discovery — dynamic import via `__plugins__` instead of hardcoded registry
-- Test suite expanded to cover: concurrency faults, runtime faults, supervisor faults, secrets faults, risk faults, and audit trails
-- `REVIEW.md` removed — systematic findings migrated to CHANGELOG and issue tracker
+- SQS distributed event bus backend — production-scale event distribution
+- Modal distributed event bus backend — serverless event bus
+- DPDPA 2023 compliance configuration (consent, DSR, breach notification)
+- RBI NPA provisioning rates (standard 0.25%, substandard 15%, doubtful 25%, loss 100%)
+- SMA classification thresholds (SMA-0: 30d, SMA-1: 60d, SMA-2: 90d)
+- Credit bureau multi-bureau config (CIBIL, Experian, Equifax + CKYC)
+- Razorpay payment gateway config (UPI Autopay, e-NACH)
+- KFS cooling-off period config (3 days per RBI DLG)
+- Underwriting rules engine config (credit score, DTI, LTV caps)
+- AML blocklist path env var for risk scoring
+- Per-product RBI pricing cap env vars (personal, micro, penal)
+- SQS/Modal bus env vars for distributed deployment
 
 ### Fixed
-- CI pipeline — removed `PYTEST_DISABLE_PLUGIN_AUTOLOAD` to fix async integration tests
-- `__health__.py` — bus health checks now validate bus is not stopped
-- `OtlpSpanExporter` — singleton initialization prevents gRPC connection storm on module import
-- Service graph — traversal caching and missing edge cases in mechanism state machine
+- `UNDERWRITE_RECOVERY_BACKOFF` mapping to correct config field
+- Communication test isolation (removed shared state)
+- AWS Secrets Manager fallback when `backend=env`
+- Vault KVv2 path resolution
+- `UNDERWRITE_SECRETS_AWS_REGION` empty-string handling
+
+---
+
+## [0.6.1] — 2026-06-15
+
+### Added
+- Compliance service: PAN category detection, Aadhaar Verhoeff checksum, AML risk scoring (keyword-weighted with low/flagged/frozen states), CKYC event emission, video KYC lifecycle hooks, consent pre-check
+- Pricing service: RBI rate caps (home 12%, gold 18%, personal 28%, micro 30%), all-in-cost APR, penal interest cap (24%), foreclosure charges, EMI amortization, DTI, GST disclosure
+- Recovery service: store-backed persistence via TypedStoreRepository
+- Event registry: `aml.flagged`, `kyc.video_initiated`, `kyc.video_verified`, `pricing.penal_interest`, `pricing.foreclosure`, recovery.offer/escalated/progress
+- Test suites: compliance (138 lines, 34 tests), recovery (202 lines, 15 tests), multi-saga concurrency
+
+### Changed
+- docker-compose.yml: filesystem → PostgreSQL 16 + Vault + OTLP collector
+- `.env.example`: comprehensive env vars for all backends, compliance, pricing thresholds
+- StatefulService: refactored store_repo/batched_repo factory methods
+- PostgresStore: lock_timeout and statement_timeout for migration safety
+- PII redactor: Aadhaar/PAN pattern coverage extended
+
+---
+
+## [0.6.0] — 2026-06-14
+
+### Added
+- Service registry wiring for 9 new Indian-lending event types
+- `consent` and `dsr` to `SERVICE_NAMES` (were missing, preventing service enablement)
+- Audit export URL env var for external audit log shipping
+- Template-based `.env.example` with all sections documented
+
+### Changed
+- Config sections added: `kfs`, `npa`, `dpdpa`, `razorpay`, `credit_bureau`, `underwriting`
+- `__config__.py` refactored for Indian lending parameters
+- `__bus__.py` — improved backpressure handling and future tracking
+
+### Fixed
+- `__service_registry__.py` missing wiring for consent, dsr services
+- `__bus__.py` — dead future reference cleanup on service shutdown
+
+---
+
+## [0.5.4] — 2026-06-10
+
+### Added
+- Async bus recovery — graceful reconnection on Redis/pub-sub failures
+- Multi-saga concurrency test — parallel saga execution safety
+
+### Fixed
+- Saga rollback ordering — compensation events emitted in reverse step order
+- Missing `correlation_id` propagation in saga compensation events
+- Circuit breaker half-open timeout not resetting after success
+
+---
+
+## [0.5.3] — 2026-06-09
+
+### Added
+- PII pattern redaction for Aadhaar (12-digit), PAN (5 letters + 4 digits + letter)
+- Voter ID and passport pattern redaction in logs
+- Audit export URL config for remote log shipping
+
+### Changed
+- PostgresStore — query timeout configuration (lock_timeout, statement_timeout)
+- Migration engine — transaction-per-version with explicit commit/rollback
+
+### Fixed
+- Postgres connection pool leak on migration failure
+- `CircuitBreaker` state not resetting after recovery timeout
+- `MetricsCollector` timer edge case with zero-duration operations
+
+---
+
+## [0.5.2] — 2026-06-08
+
+### Added
+- Distributed rate limiter — window-slot key pattern replacing TOCTOU get/set
+- Postgres lock timeout safety for concurrent migration execution
+- Dead-letter queue persistence across restarts (FileStore/PostgresStore)
+
+### Changed
+- `NanoService.__dispatch` — error logging includes correlation_id
+- `SagaOrchestrator` — per-saga RLock instead of global lock
+- `OtlpSpanExporter` — lazy SDK initialization at construction time
+
+### Fixed
+- Double event processing on service restart — idempotency guard extended
+- `UNDERWRITE_BUS_MAX_WORKERS=0` now correctly disables thread pool
+
+---
+
+## [0.5.1] — 2026-06-07
+
+### Added
+- Notification channel dispatch — SES email + Twilio SMS via ThreadPoolExecutor
+- Health check endpoint now reports per-service event counts
+- `bus` property on `NanoService` for downstream access
+
+### Changed
+- `ServicingService` — refinanced loan handling with idempotency
+- `postgres` extra now pins psycopg2-binary instead of psycopg2
+- CI pipeline: Python 3.13 added to test matrix, 3.10 retained
+
+### Fixed
+- `ServicingService.handle()` — `self.bus` access via property instead of mangled attribute
+- `disbursement/service.py` — missing `logger` import
+- Document service UUID collision — full 32-char hex UUID
+- Mechanism zero-recovery — `__default` includes principal field in payload
+
+---
+
+## [0.5.0] — 2026-06-06
+
+### Added
+- Comprehensive 37-page documentation site under `docs/` — architecture, system design, domain model, API reference, deployment, operations, security, troubleshooting
+- 4 Architecture Decision Records (ADR): nano-service architecture, event-driven communication, Ed25519 provenance, saga orchestration
+- `setup.sh` — idempotent environment bootstrap (venv, deps, pre-commit, validation)
+- `lint.sh`, `test.sh`, `format.sh`, `cleanup.sh` — standalone scripts
+- CI security scanning: bandit static analysis + pip-audit dependency auditing
+- Docker build + smoke test in CI pipeline
+- Postgres testcontainer fixtures, HTTP TestClient fixture, failure-mock fixtures in conftest.py
+- `UNDERWRITE_ALLOW_JOBLIB` env var to gate joblib deserialization (disabled by default)
+- `RISK_MODEL_SHA256` verification for risk model file integrity
+
+### Changed
+- PostgresStore pool: hand-rolled list+lock → psycopg2.pool.ThreadedConnectionPool
+- MechanismService: snapshot/rollback pattern with state_lock held during store write
+- Sagas: global RLock → per-saga RLock for concurrent execution
+- Each migration version wrapped in its own transaction
+- Risk model: JSON by default; joblib requires explicit opt-in
+- Fee payment check moved entirely inside state_lock
+
+### Fixed
+- Event signature forgery — removed `json.dumps(default=str)` from signing
+- Silent data loss — StoreRepository.save() no longer swallows Exception
+- Double disbursement — idempotency guard in disbursement service
+- Concurrent mutation loss — state lock held across store write
+- Container ran as root — added USER underwrite to Dockerfile
+- Port mismatch — docker-compose.yml port changed to 8000:8080
+
+### Security
+- Ed25519 signature verification enforced on all events
+- Risk model integrity — SHA-256 verification; joblib gated behind explicit opt-in
+
+---
+
+## [0.4.0] — 2026-06-03
+
+### Added
+- Service lifecycle — supervisor auto-restart with configurable backoff
+- Dead-letter queue — event capture, inspection, and replay via CLI
+- Window-slot rate limiter for bus subscribers
+- `__supervisor__.py` — monitors and restarts failing services
+- `UNDERWRITE_RECOVERY_AUTO_RESTART`, `MAX_RESTARTS`, `BACKOFF` env vars
+- Dead-letter queue persistence with CLI replay (`underwrite dlq --replay`)
+
+### Changed
+- `AsyncLocalBus` — per-handler timeouts (30s), CancelledError handling
+- `__config__.py` — env var overrides for recovery settings
+- Configuration loading — strict validation of unknown keys raises ConfigurationError
+- Test isolation — all integration tests use dedicated store/bus instances
+
+### Fixed
+- Dead-letter queue records persist across bus restarts
+- MemoryStore eviction distinguishes new keys from key updates
+- Service dispatch no longer silently drops handler exceptions
+- Bus health endpoint validates bus isn't stopped (not just alive)
 
 ### Security
 - `UNDERWRITE_AUTHZ_ENABLED` gating for Ed25519 signature verification
-- Authorization policy file support with `UNDERWRITE_AUTHZ_POLICY_FILE`
+- Authorization policy file support via `UNDERWRITE_AUTHZ_POLICY_FILE`
 - Crypto availability warning when `cryptography` library is missing
 
 ---
 
-## [0.3.3] — 2026-05-29
+## [0.3.3] — 2026-05-31
 
 ### Added
-- Service lifecycle — supervisor auto-restart with configurable backoff
-- `__supervisor__.py` — monitors registered services and restarts on failure
-- `UNDERWRITE_RECOVERY_AUTO_RESTART` environment variable
-- `UNDERWRITE_RECOVERY_MAX_RESTARTS` and `UNDERWRITE_RECOVERY_BACKOFF` tuning knobs
+- Configuration recovery settings — auto_restart, max_restarts, backoff_seconds
+- Service supervisor — monitors registered services, restarts on failure
 
 ### Changed
 - `AsyncLocalBus` — improved concurrency with per-handler futures tracking
-- `__config__.py` — environment variable binding for recovery settings
-- Test isolation — all integration tests use dedicated store/bus instances
-- Configuration loading — strict validation of unknown keys
+- Configuration loading — unknown keys raise ConfigurationError
 
 ### Fixed
-- Dead-letter queue records now correctly persist across bus restarts
-- `MemoryStore` eviction correctly distinguishes new key insertions from key updates
-- Service dispatch no longer silently drops exceptions from slow handlers
-
-### Security
-- Early-warning system for missing `cryptography` dependency at import time
+- DLQ records now correctly persist across bus restarts
+- MemoryStore eviction correctly distinguishes new inserts from updates
+- Service dispatch no longer silently drops slow-handler exceptions
 
 ---
 
 ## [0.3.2] — 2026-05-29
 
 ### Added
-- `AsyncLocalBus` — initial async event bus implementation
-- `__schema__.py` — schema version tracking and migration coordination
-- `conftest.py` — shared test fixtures for store, bus, and runtime integration
-- `Dockerfile` — multi-stage production build
-- `docker-compose.yml` — container orchestration with filesystem backend
-- `bandit` security linter configuration
-- Kubernetes liveness/readiness probes (`/healthz`, `/readyz`)
+- Kubernetes liveness/readiness probes (/healthz, /readyz)
+- bandit security linter configuration in pyproject.toml
+- Docker health check instruction
 
 ### Changed
-- `Runtime` — event-driven startup/shutdown with configurable graceful timeout
-- `__cli__.py` — `underwrite serve` command with `--host`, `--port`, `--services`, `--rate-limit`, `--require-auth` flags
-- `__config__.py` — extracted environment variable prefix handling into `__env__` helper
-- Store backends — `PostgresStore` uses `psycopg2.pool.ThreadedConnectionPool`
-- CI pipeline — split into separate `lint` and `docker` jobs
+- Port mapping fix: docker-compose host 8000 → container 8080
+- Container user: root → underwrite (UID 1001)
+- PostgresStore uses psycopg2.pool.ThreadedConnectionPool
 
 ### Fixed
-- Port mismatch in docker-compose (`8000` host → `8080` container)
-- Container runs as `root` — added `addgroup`/`adduser` + `USER underwrite` in Dockerfile
-- Missing `restart: unless-stopped` policy in docker-compose
+- Dockerfile — addgroup/adduser with USER underwrite
+- docker-compose.yml — added restart: unless-stopped
 
 ---
 
@@ -156,120 +309,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Document service — template rendering and PDF generation stubs
 
 ### Changed
-- Risk model loading — lazy sklearn imports; model loaded on first `handle()` call
-- `__runtime__.py` — added `readonly` mode for health/metrics without service startup
-- `__store__.py` — improved error messages on connection failures
-- `__bus__.py` — rate limiter uses configurable window size
+- Risk model loading — lazy sklearn imports; model loaded on first handle()
+- `__runtime__.py` — readonly mode for health/metrics without service startup
 
 ### Fixed
-- `ServicingService.handle()` now correctly accesses `self.bus` via public property
-- Missing `logger` import in `disbursement/service.py`
-- Collateral service — `loan_id` now propagated through all collateral events
+- ServicingService.handle() accesses self.bus via public property
+- Missing logger import in disbursement/service.py
 
 ---
 
 ## [0.3.0] — 2026-05-26
 
 ### Added
-- Circuit breaker infrastructure — per-subscriber failure tracking with configurable thresholds
-- Per-handler timeout (30s) — slow event handlers are routed to dead-letter queue
-- Event payload size validation — payloads exceeding 1 MB raise `ProtocolError`
-- `CircuitBreakerMiddleware` for automatic subscriber suspension
-- `UNDERWRITE_BUS_MAX_FUTURES` — configurable maximum pending futures
+- Circuit breaker infrastructure — per-subscriber failure tracking
+- Per-handler timeout (30s) — slow handlers routed to DLQ
+- Event payload size validation (>1 MB raises ProtocolError)
+- `UNDERWRITE_BUS_MAX_FUTURES` configurable pending futures limit
 
 ### Changed
-- `import random` moved from method body to module level in `__circuit__.py`
-- British English → American English in all docstrings (`Initialises` → `Initializes`)
-- `logger.debug(exc_info=True)` → `logger.warning` in `__bus__.py.__trim_futures()` for visible error surfacing
-- Metrics export — configurable interval via `UNDERWRITE_METRICS_EXPORT_INTERVAL`
+- British → American English in all docstrings
+- logger.debug(exc_info=True) → logger.warning in bus trim_futures
+- Metrics export interval configurable via env var
 
 ### Fixed
-- MemoryStore eviction correctly distinguishes new keys from updates
-- Async bus dispatch loop handles `CancelledError` for clean shutdown
+- MemoryStore eviction: distinguishes new keys from updates
+- AsyncBus dispatch loop: handles CancelledError for clean shutdown
 
 ---
 
 ## [0.2.0] — 2026-05-25
 
 ### Added
-- `.env.example` — documented all `UNDERWRITE_*` environment variables
-- `.pre-commit-config.yaml` — pre-commit hooks for linting and formatting
-- `tox.ini` — multi-environment test matrix
-- `test_bus_extras.py` — bus edge-case tests (rate limiting, DLQ replay, subscription validation)
-- `test_fee.py`, `test_fraud.py`, `test_mechanism.py` — service-specific test suites
-- `test_saga.py` — saga orchestration tests (commit, rollback, concurrent isolation)
-- `test_store.py` — store backend tests (memory, file, postgres CRUD + pagination)
-- `TODO.md` — project roadmap and outstanding tasks
+- `.env.example` — documented all UNDERWRITE_* environment variables
+- `.pre-commit-config.yaml` — pre-commit hooks for linting/formatting
+- Test suites: bus extras, fee, fraud, mechanism, saga, store
+- TODO.md — project roadmap (since replaced by docs/ROADMAP.md)
 
 ### Changed
-- `__bus__.py` — DLQ replay support; improved rate limiter with configurable window
-- `__config__.py` — `Configuration.default()` returns sensible production defaults
-- `__cli__.py` — `underwrite init` creates config with mechanism + audit enabled
+- `__bus__.py` — DLQ replay support; configurable rate limiter window
+- `__config__.py` — Configuration.default() returns sensible defaults
+- `__cli__.py` — underwrite init creates config with mechanism + audit enabled
 - PII redaction — field name matching uses case-insensitive regex
-- `__authz__.py` — Ed25519 key derivation uses SHA-256 hash of service name
 
 ### Fixed
-- `__identity__.py` — key TTL enforcement with grace period
+- Identity key TTL enforcement with grace period
 - Store DSN parsing for Postgres connection strings with special characters
 
 ### Security
-- PII redactor — masks passwords, tokens, SSNs, credit card numbers, and API keys in JSON logs
-- `UNDERWRITE_AUTHZ_ENABLED` defaults to `true` in production config
+- PII redactor masks passwords, tokens, SSNs, credit card numbers, API keys in logs
+- `UNDERWRITE_AUTHZ_ENABLED` defaults to true
 
 ---
 
 ## [0.1.1] — 2026-05-22
 
 ### Added
-- `CONTRIBUTING.md` — contribution guidelines and workflow
-- `SECURITY.md` — security policy and disclosure process
-- `conftest.py` — initial shared test infrastructure
-- Test suites: `test_audit.py`, `test_configuration.py`, `test_concurrency_faults.py`, `test_risk_faults.py`, `test_runtime_faults.py`, `test_secrets_faults.py`, `test_supervisor_faults.py`, `test_validate_faults.py`
+- CONTRIBUTING.md, SECURITY.md
+- conftest.py — shared test infrastructure
+- Test suites: audit, configuration, concurrency faults, risk faults, runtime faults, secrets faults, supervisor faults
 
 ### Changed
-- `__authz__.py` — service identity binding with key rotation support
-- `__bus__.py` — subscriber registration validates handler signatures
-- `__cli__.py` — `list`, `health`, `dlq`, `metrics` commands with structured output
-- `__config__.py` — environment variable overrides for all major subsystems
-- `__events__.py` — event type registry with `EventType` enum
-- `__serve__.py` — FastAPI application factory with health/metrics endpoints
-- `__store__.py` — filesystem store with atomic writes
+- Access control — service identity binding with key rotation
+- Event bus — subscriber registration validates handler signatures
+- CLI — list, health, dlq, metrics with structured output
+- Config — env var overrides for all subsystems
 
 ### Fixed
-- `pyproject.toml` — setuptools package discovery for CI builds (non-recursive `find`)
-- mypy type errors across the codebase
+- pyproject.toml setuptools package discovery (non-recursive find)
+- mypy type errors across codebase
 
 ---
 
-## [0.1.0] — 2026-05-22
+## [0.1.0] — 2026-05-20
 
 ### Added
 - Initial nano-service platform implementation
-- **Core infrastructure**: `__bus__.py` (event bus), `__store__.py` (state store), `__saga__.py` (saga orchestrator), `__authz__.py` (access control), `__circuit__.py` (circuit breaker), `__config__.py` (configuration), `__runtime__.py` (lifecycle manager), `__cli__.py` (CLI), `__serve__.py` (HTTP server)
-- **Event system**: `__events__.py` (typed events), `__identity__.py` (Ed25519 keys), Ed25519 cryptographic signatures on all events
-- **28 nano-services**: mechanism (delegation state machine), risk (ML scoring with scikit-learn), fraud detection, KYC/AML, collateral management, fee assessment, loan origination/servicing, collections, recovery, notifications, document generation, governance, pricing, provisioning, disbursement, fulfillment, agreement management, and more
-- **Pluggable store backends**: `MemoryStore`, `FileStore`, `PostgresStore`
-- **Observability**: `__metrics__.py` (Prometheus), `__tracer__.py` (OpenTelemetry), `__logger__.py` (structured JSON with PII redaction)
-- **Resilience**: dead-letter queue, retry policies, circuit breakers, idempotency guards, grace-period penalties, concentration limits
-- **HTTP API**: FastAPI server with `/v1/health`, `/v1/metrics`, `/v1/publish` endpoints, bearer auth, rate limiting, request ID propagation
-- **CLI**: `underwrite {init,run,list,identity,health,dlq,metrics}` commands
-- **Database**: Alembic migration infrastructure, connection pool tuning, read replica support, soft-delete, cursor-based pagination, batch inserts
-- **Docker**: Multi-stage production Dockerfile, docker-compose orchestration
-- **CI/CD**: GitHub Actions pipeline (lint, type-check, test across Python 3.10–3.13)
-- **Testing**: 828+ tests across 58 test files including property-based tests (Hypothesis), load tests (Locust), mutation tests (mutmut), chaos tests, contract tests
-- **Security**: JWT auth, API key management, Ed25519 event signing, PII redaction, CSP headers, secret manager (env/vault)
-- **Financial features**: e-NACH integration, payment gateway stubs, EMI auto-debit, partial prepayment, loan restructuring, liquidation workflow, collateral revaluation, bankruptcy tracking, RBI complaint management, GST verification
-- **Kubernetes**: Production manifests with blue/green deployment support
-- **Blockchain**: Algorand client with connection pooling, TEAL contract integration, multi-sig wallet, cross-chain bridge
+- Core infrastructure: event bus, state store, saga orchestrator, access control, circuit breaker, configuration, runtime, CLI, FastAPI HTTP server
+- Event system: typed EventType enum, Ed25519 cryptographic signatures
+- 28 nano-services: mechanism, risk (ML), fraud, KYC/AML, collateral, fee, origination/servicing, collections, recovery, notifications, document, governance, pricing, provisioning, disbursement
+- Pluggable stores: MemoryStore, FileStore, PostgresStore
+- Observability: Prometheus metrics, OpenTelemetry tracing, structured JSON logging with PII redaction
+- Resilience: dead-letter queue, retry policies, circuit breakers, idempotency guards
+- HTTP API: /v1/health, /v1/metrics, /v1/publish with bearer auth and rate limiting
+- Docker: multi-stage Dockerfile, docker-compose.yml
+- CI/CD: GitHub Actions pipeline (lint, type-check, test across Python 3.10–3.13)
+- Testing: 828+ tests across 58 test files (property-based, load, mutation, chaos)
 
 ---
 
-[Unreleased]: https://github.com/sachn-cs/unsecured-lending-underwriting/compare/v0.4.0...HEAD
-[0.4.0]: https://github.com/sachn-cs/unsecured-lending-underwriting/releases/tag/v0.4.0
-[0.3.3]: https://github.com/sachn-cs/unsecured-lending-underwriting/releases/tag/v0.3.3
-[0.3.2]: https://github.com/sachn-cs/unsecured-lending-underwriting/releases/tag/v0.3.2
-[0.3.1]: https://github.com/sachn-cs/unsecured-lending-underwriting/releases/tag/v0.3.1
-[0.3.0]: https://github.com/sachn-cs/unsecured-lending-underwriting/releases/tag/v0.3.0
-[0.2.0]: https://github.com/sachn-cs/unsecured-lending-underwriting/releases/tag/v0.2.0
-[0.1.1]: https://github.com/sachn-cs/unsecured-lending-underwriting/releases/tag/v0.1.1
-[0.1.0]: https://github.com/sachn-cs/unsecured-lending-underwriting/releases/tag/v0.1.0
+[Unreleased]: https://github.com/sachn-cs/underwrite/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/sachn-cs/underwrite/releases/tag/v0.6.2
+[0.6.1]: https://github.com/sachn-cs/underwrite/releases/tag/v0.6.1
+[0.6.0]: https://github.com/sachn-cs/underwrite/releases/tag/v0.6.0
+[0.5.4]: https://github.com/sachn-cs/underwrite/releases/tag/v0.5.4
+[0.5.3]: https://github.com/sachn-cs/underwrite/releases/tag/v0.5.3
+[0.5.2]: https://github.com/sachn-cs/underwrite/releases/tag/v0.5.2
+[0.5.1]: https://github.com/sachn-cs/underwrite/releases/tag/v0.5.1
+[0.5.0]: https://github.com/sachn-cs/underwrite/releases/tag/v0.5.0
+[0.4.0]: https://github.com/sachn-cs/underwrite/releases/tag/v0.4.0
+[0.3.3]: https://github.com/sachn-cs/underwrite/releases/tag/v0.3.3
+[0.3.2]: https://github.com/sachn-cs/underwrite/releases/tag/v0.3.2
+[0.3.1]: https://github.com/sachn-cs/underwrite/releases/tag/v0.3.1
+[0.3.0]: https://github.com/sachn-cs/underwrite/releases/tag/v0.3.0
+[0.2.0]: https://github.com/sachn-cs/underwrite/releases/tag/v0.2.0
+[0.1.1]: https://github.com/sachn-cs/underwrite/releases/tag/v0.1.1
+[0.1.0]: https://github.com/sachn-cs/underwrite/releases/tag/v0.1.0

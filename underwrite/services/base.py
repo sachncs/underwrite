@@ -270,7 +270,8 @@ class NanoService(ABC):
                         },
                     )
                 if hasattr(self.__bus, "dlq") and self.__bus.dlq:
-                    self.__bus.dlq.put(event, "authz_failed", self.__service_id)
+                    self.__bus.dlq.put(event, "authz_failed",
+                                       self.__service_id)
                 return
         if self.__bus.idempotency.is_duplicate(self.__service_id,
                                                event.event_id):
@@ -288,8 +289,8 @@ class NanoService(ABC):
         start = time.perf_counter()
         with (self.__tracer.trace(
                 f"handle.{event.event_type}",
-                trace_id=event.trace_id or event.correlation_id or
-                event.event_id,
+                trace_id=event.trace_id or event.correlation_id
+                or event.event_id,
                 parent_span_id=event.parent_span_id,
                 tags={
                     "service": self.__service_id,

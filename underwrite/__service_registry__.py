@@ -44,6 +44,12 @@ SERVICE_MAP: dict[str, str] = {
     "decision": "underwrite.services.decision.service",
     "fee": "underwrite.services.fee.service",
     "statement": "underwrite.services.statement.service",
+    "prepayment": "underwrite.services.prepayment.service",
+    "kfs": "underwrite.services.kfs.service",
+    "razorpay": "underwrite.services.razorpay.service",
+    "consent": "underwrite.services.consent.service",
+    "dsr": "underwrite.services.dsr.service",
+    "credit_bureau": "underwrite.services.credit_bureau.service",
 }
 
 SERVICE_CLASSES: dict[str, str] = {
@@ -75,29 +81,31 @@ SERVICE_CLASSES: dict[str, str] = {
     "decision": "DecisionService",
     "fee": "FeeService",
     "statement": "StatementService",
+    "prepayment": "PrepaymentService",
+    "kfs": "KfsService",
+    "razorpay": "RazorpayService",
+    "consent": "ConsentService",
+    "dsr": "DataSubjectRightsService",
+    "credit_bureau": "CreditBureauService",
 }
 
 WIRING: dict[str, list[str]] = {
     EventType.SEED_ADDED.value: ["audit", "origination"],
-    EventType.USER_ADDED.value: [
-        "audit", "fraud", "compliance", "risk", "origination"
-    ],
+    EventType.USER_ADDED.value:
+    ["audit", "fraud", "compliance", "risk", "origination"],
     EventType.LOAN_ORIGINATED.value: [
         "audit", "fraud", "risk", "npa", "collateral", "collection",
         "servicing", "payment", "fee"
     ],
-    EventType.REPAID.value: [
-        "audit", "fraud", "collection", "payment", "servicing"
-    ],
-    EventType.DEFAULT_OCCURRED.value: [
-        "audit", "npa", "collateral", "recovery", "settlement", "workflow"
-    ],
+    EventType.REPAID.value:
+    ["audit", "fraud", "collection", "payment", "servicing"],
+    EventType.DEFAULT_OCCURRED.value:
+    ["audit", "npa", "collateral", "recovery", "settlement", "workflow"],
     EventType.REVOKED.value: ["audit", "graph"],
     EventType.QUOTE_CALCULATED.value: ["audit", "pricing"],
     EventType.KYC_VERIFIED.value: ["audit", "compliance", "workflow"],
-    EventType.KYC_REJECTED.value: [
-        "audit", "compliance", "notification", "workflow"
-    ],
+    EventType.KYC_REJECTED.value:
+    ["audit", "compliance", "notification", "workflow"],
     EventType.AML_CLEARED.value: ["audit", "compliance"],
     EventType.AML_FROZEN.value: ["audit", "compliance", "notification"],
     EventType.FRAUD_ALERT.value: ["audit", "notification", "decision"],
@@ -105,8 +113,12 @@ WIRING: dict[str, list[str]] = {
     EventType.VELOCITY_FLAG.value: ["audit", "notification", "decision"],
     EventType.RISK_SCORED.value: ["audit", "underwriter", "decision"],
     EventType.RISK_EARLY_WARNING.value: ["audit", "notification", "servicing"],
-    EventType.NPA_BUCKET_CHANGED.value: ["audit", "notification", "collection"],
+    EventType.NPA_BUCKET_CHANGED.value:
+    ["audit", "notification", "collection", "reporting"],
     EventType.DLG_TRIGGERED.value: ["audit", "notification", "recovery"],
+    EventType.SMA_CLASSIFIED.value: ["audit", "notification", "collection"],
+    EventType.PROVISIONING_COMPUTED.value: ["audit", "reporting", "collection"],
+    EventType.INCOME_RECOGNITION_SUSPENDED.value: ["audit", "servicing", "notification"],
     EventType.COLLATERAL_MARKED.value: ["audit"],
     EventType.COLLATERAL_LIQUIDATED.value: ["audit", "settlement"],
     EventType.GOVERNANCE_PROPOSAL.value: ["governance"],
@@ -117,31 +129,91 @@ WIRING: dict[str, list[str]] = {
     EventType.IDENTITY_ROTATED.value: ["audit", "identity"],
     EventType.NOTIFICATION_SENT.value: ["audit", "communication"],
     EventType.REPORT_GENERATED.value: ["audit", "reporting"],
-    EventType.UNDERWRITER_APPROVED.value: [
-        "audit", "document", "disbursement", "workflow"
-    ],
-    EventType.UNDERWRITER_REJECTED.value: ["audit", "notification", "workflow"],
+    EventType.UNDERWRITER_APPROVED.value:
+    ["audit", "document", "disbursement", "workflow"],
+    EventType.UNDERWRITER_REJECTED.value:
+    ["audit", "notification", "workflow"],
+    EventType.UNDERWRITER_CONDITIONAL_APPROVED.value:
+    ["audit", "notification", "workflow"],
+    EventType.UNDERWRITER_REVIEW.value:
+    ["audit", "notification", "workflow"],
+    EventType.UNDERWRITER_ESCALATED.value:
+    ["audit", "notification", "workflow"],
+    EventType.UNDERWRITE_RULE_VIOLATED.value:
+    ["audit", "notification"],
     EventType.PRICING_COMPUTED.value: ["audit", "quote", "document"],
-    EventType.DOCUMENT_GENERATED.value: [
-        "audit", "disbursement", "communication"
-    ],
+    EventType.DOCUMENT_GENERATED.value:
+    ["audit", "disbursement", "communication"],
     EventType.DISBURSEMENT_PROCESSED.value: ["audit", "servicing"],
     EventType.COLLECTION_UPDATED.value: ["audit", "statement", "fee"],
     EventType.SETTLEMENT_COMPLETED.value: ["audit", "servicing", "reporting"],
     EventType.ORIGINATION_CREATED.value: ["audit", "underwriter", "workflow"],
-    EventType.ORIGINATION_SUBMITTED.value: [
-        "audit", "risk", "fraud", "compliance"
-    ],
-    EventType.PAYMENT_RECEIVED.value: [
-        "audit", "collection", "servicing", "statement"
-    ],
+    EventType.ORIGINATION_SUBMITTED.value:
+    ["audit", "risk", "fraud", "compliance"],
+    EventType.PAYMENT_RECEIVED.value:
+    ["audit", "collection", "servicing", "statement"],
     EventType.PAYMENT_DUE.value: ["audit", "notification", "communication"],
-    EventType.PAYMENT_OVERDUE.value: [
-        "audit", "collection", "fee", "notification"
-    ],
+    EventType.PAYMENT_OVERDUE.value:
+    ["audit", "collection", "fee", "notification"],
     EventType.FEE_ASSESSED.value: ["audit", "statement"],
+    EventType.PENAL_INTEREST_ASSESSED.value: ["audit", "fee", "statement"],
+    EventType.PREPAYMENT_REQUEST.value: ["audit", "prepayment"],
+    EventType.PREPAYMENT_PROCESSED.value:
+    ["audit", "servicing", "payment", "collection", "statement"],
+    EventType.FORECLOSURE_COMPUTED.value: ["audit", "prepayment", "statement"],
+    EventType.KFS_GENERATE.value: ["audit", "kfs"],
+    EventType.KFS_GENERATED.value: ["audit", "communication", "document"],
     EventType.STATEMENT_GENERATED.value: ["audit", "communication"],
+    EventType.RAZORPAY_ORDER_CREATE.value: ["audit", "razorpay"],
+    EventType.RAZORPAY_ORDER_CREATED.value: ["audit", "payment", "servicing"],
+    EventType.RAZORPAY_SUBSCRIBE.value: ["audit", "razorpay"],
+    EventType.RAZORPAY_PAYMENT_CAPTURED.value: ["audit", "payment", "servicing", "collection", "notification"],
+    EventType.RAZORPAY_PAYMENT_FAILED.value: ["audit", "notification"],
+    EventType.RAZORPAY_PAYMENT_REFUNDED.value: ["audit", "payment", "servicing"],
+    EventType.RAZORPAY_SUBSCRIPTION_CREATED.value: ["audit", "notification"],
+    EventType.RAZORPAY_SUBSCRIPTION_CHARGED.value: ["audit", "payment", "servicing", "collection"],
+    EventType.RAZORPAY_SUBSCRIPTION_FAILED.value: ["audit", "notification"],
+    EventType.RAZORPAY_MANDATE_ACTIVE.value: ["audit", "servicing", "notification"],
+    EventType.RAZORPAY_MANDATE_INACTIVE.value: ["audit", "notification"],
+    EventType.RAZORPAY_WEBHOOK_RECEIVED.value: ["audit", "razorpay"],
+    EventType.CONSENT_RECORDED.value: ["audit", "consent"],
+    EventType.CONSENT_WITHDRAWN.value: ["audit", "consent"],
+    EventType.CONSENT_EXPIRED.value: ["audit", "consent", "notification"],
+    EventType.DSR_REQUEST.value: ["audit", "dsr"],
+    EventType.DSR_REQUESTED.value: ["audit", "notification"],
+    EventType.DSR_FULFILLED.value: ["audit", "dsr", "notification"],
+    EventType.DSR_REJECTED.value: ["audit", "dsr", "notification"],
+    EventType.GRIEVANCE_LOGGED.value: ["audit", "dsr"],
+    EventType.GRIEVANCE_RESOLVED.value: ["audit", "dsr", "notification"],
+    EventType.BREACH_DETECTED.value: ["audit", "dsr", "notification"],
+    EventType.BREACH_NOTIFIED.value: ["audit", "notification"],
+    EventType.BREACH_CLOSED.value: ["audit", "dsr"],
+    EventType.DATA_PURGED.value: ["audit", "dsr"],
+    EventType.DATA_ARCHIVED.value: ["audit", "dsr"],
     EventType.WORKFLOW_STARTED.value: ["audit"],
     EventType.WORKFLOW_COMPLETED.value: ["audit", "notification"],
     EventType.DECISION_MADE.value: ["audit", "underwriter", "workflow"],
+    EventType.CREDIT_BUREAU_CHECK.value: ["audit", "credit_bureau"],
+    EventType.CREDIT_BUREAU_CHECKED.value: ["audit", "underwriter", "notification"],
+    EventType.CREDIT_BUREAU_CHECK_FAILED.value: ["audit", "notification"],
+    EventType.CKYC_VERIFY.value: ["audit", "credit_bureau"],
+    EventType.CKYC_VERIFIED.value: ["audit", "compliance", "notification", "workflow"],
+    EventType.CKYC_REJECTED.value: ["audit", "compliance", "notification", "workflow"],
+
+    # Compliance — video KYC, AML risk levels
+    "aml.flagged": ["audit", "compliance", "notification", "decision"],
+    "kyc.video_initiated": ["audit", "compliance", "notification"],
+    "kyc.video_verified": ["audit", "compliance", "workflow"],
+
+    # Pricing — penal interest, foreclosure
+    "pricing.penal_interest": ["audit", "pricing"],
+    "pricing.penal_interest_computed": ["audit", "fee", "collection", "statement"],
+    "pricing.foreclosure": ["audit", "pricing"],
+    "pricing.foreclosure_computed": ["audit", "prepayment", "settlement"],
+
+    # Recovery — progress events
+    "recovery.offer": ["audit", "communication", "notification"],
+    "recovery.offer_response": ["audit", "recovery"],
+    "recovery.escalated": ["audit", "notification", "collection"],
+    "recovery.progress": ["audit", "collection", "statement"],
 }

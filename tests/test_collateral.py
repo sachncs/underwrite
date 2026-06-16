@@ -39,7 +39,8 @@ class TestCollateralService:
     def test_emits_marked_event_with_correct_values(self) -> None:
         bus = LocalBus()
         received: list[Event] = []
-        bus.subscribe(EventType.COLLATERAL_MARKED, lambda e: received.append(e))
+        bus.subscribe(EventType.COLLATERAL_MARKED,
+                      lambda e: received.append(e))
         svc = collateral(bus=bus)
         bus.start()
         svc.handle(
@@ -121,15 +122,20 @@ class TestCollateralService:
                       "borrower": "b",
                       "principal": 200
                   }))
-        assert svc.get("a")["principal"] == 100
-        assert svc.get("b")["principal"] == 200
-        assert svc.get("a")["required"] == 75.0
-        assert svc.get("b")["required"] == 150.0
+        col_a = svc.get("a")
+        assert col_a is not None
+        assert col_a["principal"] == 100
+        col_b = svc.get("b")
+        assert col_b is not None
+        assert col_b["principal"] == 200
+        assert col_a["required"] == 75.0
+        assert col_b["required"] == 150.0
 
     def test_ignores_unrelated_event_types(self) -> None:
         bus = LocalBus()
         received: list[Event] = []
-        bus.subscribe(EventType.COLLATERAL_MARKED, lambda e: received.append(e))
+        bus.subscribe(EventType.COLLATERAL_MARKED,
+                      lambda e: received.append(e))
         svc = collateral(bus=bus)
         bus.start()
         svc.handle(Event(event_type="seed.added", source="test", payload={}))
@@ -156,7 +162,9 @@ class TestCollateralService:
             Event(event_type=EventType.LOAN_ORIGINATED,
                   source="test",
                   payload={"borrower": "x"}))
-        assert svc.get("x")["required"] == 0.0
+        col_x = svc.get("x")
+        assert col_x is not None
+        assert col_x["required"] == 0.0
 
     def test_liquidation_removes_borrower(self) -> None:
         svc = collateral()

@@ -1,90 +1,100 @@
-# underwrite — Delegated Underwriting Protocol
+# underwrite — Indian Lending Platform (Beta)
 
-[![CI](https://github.com/sachn-cs/unsecured-lending-underwriting/actions/workflows/ci.yml/badge.svg)](https://github.com/sachn-cs/unsecured-lending-underwriting/actions/workflows/ci.yml)
+[![CI](https://github.com/sachn-cs/underwrite/actions/workflows/ci.yml/badge.svg)](https://github.com/sachn-cs/underwrite/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12%20|%203.13-blue)](https://pypi.org/project/underwrite/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-A **nano-service platform** for unsecured lending underwriting. Each service is independently deployable, configuration-driven, and communicates over a shared in-process event bus with Ed25519 cryptographic attestation.
+> **Beta — not yet production-ready.** See [caveats](#status) below.
 
-- **28 nano-services** — risk scoring (ML), fraud detection, KYC/AML, collateral management, loan origination (servicing), fee assessment, collections, recovery, notifications, governance, and more
-- **Event-driven architecture** — typed events with Ed25519 signatures, saga orchestration, dead-letter queues, circuit breakers
-- **Pluggable backends** — memory / filesystem / Postgres for state; local or OTLP for observability
-- **Production-hardened** — 828+ tests, rate limiting, idempotency guards, distributed tracing, structured logging with PII redaction, Prometheus metrics, Kubernetes probes
-- **Type-safe** — 90 source modules, fully typed (PEP 585/604), `py.typed` marker, ruff/mypy clean
+A **nano-service platform** for Indian retail lending. Designed for RBI Digital Lending Guidelines compliance, with DPDPA 2023 data protection, 30+ independently deployable services connected by an event bus with Ed25519 cryptographic attestation.
 
----
-
-## Documentation
-
-Full documentation site at [`docs/`](docs/README.md):
-
-| Area | Documents |
-|------|-----------|
-| **Getting Started** | [Installation](docs/INSTALLATION.md) · [Quickstart](docs/QUICKSTART.md) · [Configuration](docs/CONFIGURATION.md) · [Env Vars](docs/ENVIRONMENT_VARIABLES.md) |
-| **Architecture** | [Overview](docs/ARCHITECTURE.md) · [System Design](docs/SYSTEM_DESIGN.md) · [Domain Model](docs/DOMAIN_MODEL.md) · [Design Decisions](docs/DESIGN_DECISIONS.md) |
-| **Development** | [Guide](docs/DEVELOPMENT.md) · [Testing](docs/TESTING.md) · [Debugging](docs/DEBUGGING.md) · [Code Style](docs/CODE_STYLE.md) · [Build](docs/BUILD.md) |
-| **Operations** | [Deployment](docs/DEPLOYMENT.md) · [Operations](docs/OPERATIONS.md) · [Observability](docs/OBSERVABILITY.md) · [Security](docs/SECURITY.md) · [Performance](docs/PERFORMANCE.md) |
-| **Reference** | [API](docs/API.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [FAQ](docs/FAQ.md) · [Glossary](docs/GLOSSARY.md) |
-| **Project** | [Contributing](docs/CONTRIBUTING.md) · [Maintenance](docs/MAINTENANCE.md) · [Roadmap](docs/ROADMAP.md) · [Changelog](CHANGELOG.md) |
+- **31 nano-services** — KYC/AML (PAN + Aadhaar Verhoeff), CIBIL/Experian/Equifax credit bureau, CKYC registry, RBI rate-capped pricing, KFS generation, DPDPA consent + DSR, Razorpay PG, risk scoring, fraud detection, collections, recovery, notifications, governance
+- **Event-driven** — typed events with Ed25519 signatures, saga orchestration, dead-letter queues, circuit breakers
+- **Pluggable backends** — memory / filesystem / Postgres; local / SQS / Modal event bus; console / OTLP tracing
+- **1167 tests** — rate limiting, idempotency guards, PII redaction, Prometheus metrics
 
 ---
 
-## Prerequisites
+## Status
 
-- **Python 3.10+**
-- **PostgreSQL 14+** (only if using `underwrite[postgres]` backend)
-- **Docker** (optional, for containerised deployment)
+This is an **early-stage beta**. It is not production-ready. Known gaps:
+
+- Real API integrations for PAN (NSDL/ITD), Aadhaar (UIDAI), CKYC, CIBIL, and AML blocklists are **stubbed** — format validation only
+- Video KYC provider integration is **not yet implemented**
+- e-NACH / UPI Autopay mandate collection is **stubbed** (event definitions exist, Razorpay integration skeleton present)
+- No RBAC beyond basic access control
+- No disaster recovery procedures documented
+- Developer experience is rough — no pre-built Docker images, no Helm charts, manual service wiring required
+
+If you need a production-grade Indian lending platform today, underwrite is not the right choice.
 
 ---
 
 ## Quick Start
 
 ```bash
-# Clone and setup
-git clone https://github.com/sachn-cs/unsecured-lending-underwriting.git
-cd unsecured-lending-underwriting
+git clone https://github.com/sachn-cs/underwrite.git
+cd underwrite
 ./setup.sh
-
-# Activate environment
 source .venv/bin/activate
-
-# Run all tests
-pytest
-
-# Start services interactively
-underwrite run mechanism audit risk
-
-# Check health
-underwrite health
+python -m pytest tests/ --tb=short -q   # 1167 tests
 ```
+
+To run an Indian lending scenario:
+
+```bash
+underwrite init
+# edit underwrite.json to enable: mechanism,audit,risk,fraud,compliance,consent,credit_bureau,kfs,pricing,underwriter,decision
+underwrite run mechanism audit risk fraud compliance consent credit_bureau kfs pricing underwriter decision
+# In another terminal:
+python docs/examples/indian_lending.py
+# See docs/QUICKSTART.md for the full walkthrough
+```
+
+---
+
+## Documentation
+
+Full docs at [`docs/`](docs/README.md) — but expect rough edges:
+
+| Area | Documents |
+|------|-----------|
+| **Getting Started** | [Installation](docs/INSTALLATION.md) · [Quickstart](docs/QUICKSTART.md) (Indian scenario) · [Configuration](docs/CONFIGURATION.md) · [Env Vars](docs/ENVIRONMENT_VARIABLES.md) |
+| **Architecture** | [Overview](docs/architecture.md) · [System Design](docs/SYSTEM_DESIGN.md) · [Domain Model](docs/DOMAIN_MODEL.md) · [Design Decisions](docs/DESIGN_DECISIONS.md) |
+| **Development** | [Guide](docs/DEVELOPMENT.md) · [Testing](docs/TESTING.md) · [Debugging](docs/DEBUGGING.md) · [Code Style](docs/CODE_STYLE.md) · [Build](docs/BUILD.md) |
+| **Operations** | [Deployment](docs/DEPLOYMENT.md) · [Operations](docs/OPERATIONS.md) · [Observability](docs/OBSERVABILITY.md) · [Security](docs/SECURITY.md) (DPDPA) · [Performance](docs/PERFORMANCE.md) |
+| **Reference** | [API](docs/API.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [FAQ](docs/FAQ.md) · [Glossary](docs/GLOSSARY.md) |
+| **Project** | [Contributing](docs/CONTRIBUTING.md) · [Maintenance](docs/MAINTENANCE.md) · [Roadmap](docs/ROADMAP.md) |
+
+---
+
+## Prerequisites
+
+- **Python 3.10+**
+- **PostgreSQL 14+** (optional — memory/filesystem backends work without it)
+- **Docker** (optional — for `docker compose up` with Postgres + Vault + OTLP)
 
 ---
 
 ## Installation
 
 ```bash
-# From PyPI
 pip install underwrite
-
-# With extras
+# With extras:
 pip install "underwrite[risk,serve,postgres,otlp,vault,aws]"
-
-# Development
+# Development:
 pip install -e ".[dev,risk,serve,postgres,otlp,vault,aws]"
 ```
 
-### Optional Extras
-
 | Extra | Provides |
 |-------|----------|
-| `risk` | NumPy, scikit-learn — ML risk scoring models |
-| `serve` | Uvicorn, FastAPI — HTTP server (`underwrite serve`) |
+| `risk` | NumPy, scikit-learn — ML risk models |
+| `serve` | Uvicorn, FastAPI — HTTP server |
 | `postgres` | psycopg2-binary — Postgres state store |
 | `otlp` | OpenTelemetry SDK — distributed tracing |
-| `vault` | hvac — HashiCorp Vault secrets backend |
-| `aws` | boto3 — AWS SES/SNS notifications |
-| `gcs` | google-cloud-storage — GCS backup |
+| `vault` | hvac — HashiCorp Vault secrets |
+| `aws` | boto3 — SES, SQS, Secrets Manager |
 | `security` | bandit, pip-audit — vulnerability scanning |
 | `dev` | pytest, ruff, mypy, hypothesis, testcontainers |
 
@@ -92,238 +102,109 @@ pip install -e ".[dev,risk,serve,postgres,otlp,vault,aws]"
 
 ## Configuration
 
-underwrite can be configured via **JSON config file**, **environment variables**, or **both** (env vars override).
-
-### Config File
-
-Create a default config:
-
-```bash
-underwrite init
-```
-
-This writes `underwrite.json` with sensible defaults. Edit it to enable/disable services and tune behaviour.
-
-### Environment Variables
-
-Every setting can be overridden via `UNDERWRITE_*` env vars. See [`.env.example`](.env.example) for the full list:
+Configure via **JSON file** (created with `underwrite init`), **env vars**, or both (env vars override). See [`.env.example`](.env.example) for all supported vars, including RBI pricing caps, AML thresholds, credit bureau API keys, Razorpay credentials, and DPDPA retention periods.
 
 ```bash
 UNDERWRITE_STORE_BACKEND=postgres
 UNDERWRITE_STORE_DSN=postgresql://user:pass@localhost:5432/underwrite
-UNDERWRITE_LOG_LEVEL=DEBUG
-UNDERWRITE_BUS_RATE_LIMIT=200
+UNDERWRITE_PERSONAL_LOAN_RATE_CAP=0.28
+UNDERWRITE_PENAL_INTEREST_CAP=0.24
 ```
-
-### HTTP Server Authentication
-
-Set `UNDERWRITE_API_TOKEN` and start with `underwrite serve --require-auth` to require `Authorization: Bearer <token>` on every request.
 
 ---
 
-## CLI Usage
+## CLI
 
 ```
-underwrite — Delegated Underwriting Protocol — nano-service platform
+underwrite
 
 Commands:
-  init [PATH]              Create default config file
+  init [PATH]              Create default config
   run <service>...         Start one or more services
-  list                     List all available nano-services
-  identity <service>       Generate Ed25519 identity for a service
-  health                   Show system health status
+  list                     List all 31 nano-services
+  identity <service>       Generate Ed25519 keypair
+  health                   System health status
   dlq [--replay] [--max N] Show or replay dead-letter queue
-  metrics                  Show metrics snapshot
+  metrics                  Metrics snapshot (Prometheus-format on /v1/metrics)
   migrate                  Run pending schema migrations
   serve                    Start HTTP daemon (requires [serve] extra)
-```
-
-### Examples
-
-```bash
-# Start interactive services
-underwrite run mechanism risk audit fraud fee collection recovery
-
-# HTTP daemon on port 8080 with auth
-UNDERWRITE_API_TOKEN=secret underwrite serve --host 0.0.0.0 --port 8080 --require-auth
-
-# View dead-letter queue
-underwrite dlq
-
-# Replay failed events
-underwrite dlq --replay --max 50
 ```
 
 ---
 
 ## HTTP API
 
-When running with `underwrite serve`:
+When running `underwrite serve`:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/healthz` | GET | Kubernetes liveness probe |
-| `/readyz` | GET | Kubernetes readiness probe |
-| `/v1/health` | GET | Full system health (bus, store, services) |
+| `/healthz` | GET | Liveness probe |
+| `/readyz` | GET | Readiness probe |
+| `/v1/health` | GET | Full system health |
 | `/v1/metrics` | GET | Prometheus-format metrics |
 | `/v1/publish` | POST | Publish a domain event |
 
-### Publish Example
-
-```bash
-curl -X POST http://localhost:8080/v1/publish \
-  -H "Content-Type: application/json" \
-  -d '{"event_type": "loan_originated", "payload": {"loan_id": "abc123"}}'
-```
-
-All responses include `X-Request-ID` for tracing. The `--require-auth` flag enables bearer-token authentication.
-
----
-
-## Docker
-
-```bash
-# Build
-docker build -t underwrite .
-
-# Run with Postgres
-docker-compose up
-
-# Or standalone
-docker run -d -p 8080:8080 \
-  -e UNDERWRITE_STORE_BACKEND=filesystem \
-  underwrite serve --services mechanism,audit,risk
-```
-
-The container runs as non-root user `underwrite` (UID 1001). See [`docker-compose.yml`](docker-compose.yml) for the full setup.
-
----
-
-## Development
-
-```bash
-# Automated bootstrap
-./setup.sh
-
-# Or manual
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev,risk,serve,postgres,otlp,vault,aws]"
-pre-commit install
-
-# Run tests (with coverage)
-pytest --cov=underwrite
-
-# Lint
-ruff check underwrite/ tests/
-ruff format --check underwrite/ tests/
-
-# Type check
-mypy underwrite/
-
-# Security audit
-bandit -r underwrite/ -c pyproject.toml
-pip-audit
-
-# Build wheel + sdist
-python -m build
-```
-
-### Companion Scripts
-
-| Script | Purpose |
-|--------|---------|
-| `./setup.sh` | Idempotent environment bootstrap (venv, deps, pre-commit) |
-| `./test.sh` | Run tests with coverage |
-| `./lint.sh` | Run ruff check + mypy |
-| `./format.sh` | Auto-format with ruff |
-| `./cleanup.sh` | Remove all build/test artifacts |
-
-### Makefile
-
-```bash
-make test       # pytest -v
-make lint       # ruff check
-make typecheck  # mypy
-make build      # python -m build
-make clean      # remove artifacts
-```
+Authentication via `Authorization: Bearer <token>` when started with `--require-auth`.
 
 ---
 
 ## Project Structure
 
 ```
-underwrite/                          # Source package (90 modules)
-  __init__.py                        # Public API exports
-  __bus__.py                         # Event bus — pub/sub, DLQ, rate limiter, idempotency
-  __store__.py                       # State store — memory / file / postgres with CQRS
-  __saga__.py                        # Saga orchestrator — per-saga locking, auto-rollback
-  __authz__.py                       # Access control & Ed25519 signature verification
-  __circuit__.py                     # Circuit breaker & retry policy
-  __config__.py                      # Configuration engine (Pydantic)
-  __runtime__.py                     # Service lifecycle manager
-  __serve__.py                       # FastAPI HTTP server
-  __cli__.py                         # CLI (typer-based, 9 commands)
-  __events__.py                      # Event type registry
-  __identity__.py                    # Ed25519 key management
-  __logger__.py                      # Structured JSON logger with PII redaction
-  __tracer__.py                      # OpenTelemetry distributed tracing
-  __metrics__.py                     # Prometheus metrics collection
-  __exceptions__.py                  # Domain exception hierarchy
-  __version__.py                     # Auto-generated by setuptools-scm
-  services/                          # 28 nano-service implementations
-    base.py                          # NanoService ABC with ThreadPoolExecutor dispatch
-    mechanism/                       # Delegation state machine (core)
-    risk/                            # ML risk scoring (scikit-learn + JSON fallback)
-    fraud/                           # Fraud detection
-    fee/                             # Fee assessment & collection
-    audit/                           # Event audit log
-    collection/                      # Collections workflow
-    recovery/                        # Recovery & rollback
-    notification/                    # SES email + Twilio SMS dispatch
-    document/                        # Document generation
-    governance/                      # Governance rules engine
-    collateral/                      # Collateral management
-    kyc/                             # KYC/AML verification
-    disbursement/                    # Loan disbursement (with idempotency guard)
-    servicing/                       # Loan servicing (repayments, delinquency)
-    kybp/                            # KYB (business verification)
-    pricing/                         # Pricing engine
-    provision/                       # Provisioning
-    origination/                     # Origination workflow
-    fulfillment/                     # Fulfillment workflow
-    agreement/                       # Agreement management
-    ...                              # (remaining nano-services)
-tests/                               # 58 test files, 828+ tests
-docs/                                # 37-page documentation site
+underwrite/                    # Source (90+ modules, fully typed)
+  __config__.py                # Pydantic configuration (28 sections)
+  __bus__.py                   # Event bus — pub/sub, DLQ, rate limiter
+  __store__.py                 # State store — memory / file / postgres
+  __saga__.py                  # Saga orchestrator
+  __authz__.py                 # Access control & Ed25519 verification
+  __identity__.py              # Ed25519 key management
+  __events__.py                # 105+ event types
+  __pii.py                     # PII redaction (Aadhaar, PAN, etc.)
+  services/                    # 31 nano-services
+    base.py                    # NanoService ABC
+    mechanism/                 # Delegation state machine (core)
+    compliance/                # KYC/AML — PAN category, Aadhaar Verhoeff, risk score
+    pricing/                   # RBI caps, APR, EMI, penal interest, foreclosure
+    kfs/                       # Key Fact Statement generation
+    consent/                   # DPDPA consent lifecycle
+    dsr/                       # Data Subject Rights fulfillment
+    credit_bureau/             # CIBIL/Experian/Equifax + CKYC
+    razorpay/                  # Payment gateway integration
+    risk/                      # ML risk scoring
+    fraud/                     # Fraud detection
+    audit/                     # Event ledger (PII-redacted)
+    npa/                       # Asset classification (SMA/NPA/DLG)
+    recovery/                  # Default recovery (store-backed)
+    ...                        # 17 more services
+tests/                         # 58 test files, 1167 tests
+docs/                          # 9 updated docs for Indian market
 ```
 
 ---
 
 ## Architecture
 
-Each nano-service extends `NanoService` and implements a single `handle(event: Event) -> None` method:
+Each nano-service extends `NanoService` with a single `handle(event: Event) -> None`:
 
-1. **Subscribe** — services declare interest in event types via config
-2. **Dispatch** — `__dispatch()` wraps every handler with authz verification, idempotency check, distributed tracing span, metrics recording, and timeout enforcement
-3. **Emit** — services call `self.emit(event)` which signs the event with the service's Ed25519 key
-4. **Persist** — state flows through the `Store` abstraction (MemoryStore, FileStore, PostgresStore)
+1. **Subscribe** — declare interest in event types via config
+2. **Dispatch** — handler wrapped with authz, idempotency, tracing, metrics, timeout
+3. **Emit** — `self.emit(event)` signs with Ed25519 and publishes to bus
+4. **Persist** — state via `Store` (MemoryStore / FileStore / PostgresStore)
 
-Cross-cutting concerns — authz, tracing, metrics, sagas, service supervisor, circuit breaker — are injected by the bus and runtime, not inherited by services.
+Cross-cutting concerns (authz, tracing, metrics, sagas, supervisor, circuit breaker) are injected by the bus and runtime — not inherited by services.
 
-### Key Design Decisions
+### Design Decisions
 
 | Principle | Implementation |
 |-----------|----------------|
-| **Event provenance** | Every event carries an Ed25519 signature — verified before dispatch |
-| **Concurrent safety** | Per-saga locks; window-slot rate limiter; state lock during CQRS writes |
-| **Fault isolation** | Dead-letter queue with replay; circuit breaker per subscriber; per-handler timeout |
-| **No single point of failure** | ThreadPoolExecutor dispatch; lazy Postgres pool; graceful shutdown timeout |
-| **Security-first** | No `json.dumps(default=str)` in signing; joblib gated by env var; bearer auth |
+| **Event provenance** | Ed25519 signature on every event, verified before dispatch |
+| **Fault isolation** | DLQ with replay; per-subscriber circuit breaker; per-handler timeout |
+| **Security-first** | No `str(default)` in signing; joblib gated by env var; bearer auth; PII redaction |
+| **RBI compliance** | Per-product rate caps, all-in-cost APR, penal interest limit, KFS cooling-off |
+| **DPDPA compliance** | Consent lifecycle, DSR fulfillment, breach notification, auto-purge |
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE). Not legal advice. Consult a qualified attorney before deploying in a regulated environment.

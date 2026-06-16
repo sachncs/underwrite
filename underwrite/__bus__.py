@@ -227,8 +227,8 @@ class DeadLetterQueue:
             except Exception:
                 logger.exception("DLQ replay failed for event %s",
                                  record.event.event_id)
-                self.put(record.event,
-                         f"replay_failed: {record.error}", record.subscriber_id)
+                self.put(record.event, f"replay_failed: {record.error}",
+                         record.subscriber_id)
         return replayed
 
 
@@ -501,7 +501,8 @@ class LocalBus(EventBus):
         self.__running: bool = False
         self.__dlq: DeadLetterQueue = DeadLetterQueue(store=store)
         self.__idempotency: IdempotencyGuard = IdempotencyGuard()
-        self.__circuit_breaker: PerSubscriberCircuitBreaker = PerSubscriberCircuitBreaker()
+        self.__circuit_breaker: PerSubscriberCircuitBreaker = PerSubscriberCircuitBreaker(
+        )
         self.__max_buffer_size: int = max_buffer_size
         self.__rate_limiter: RateLimiter | None = RateLimiter(
             rate_limit) if rate_limit > 0 else None
@@ -568,8 +569,7 @@ class LocalBus(EventBus):
         with self.__lock:
             for event_type in list(self.__handlers):
                 self.__handlers[event_type] = [
-                    (sid, h)
-                    for sid, h in self.__handlers[event_type]
+                    (sid, h) for sid, h in self.__handlers[event_type]
                     if sid != subscription_id
                 ]
 

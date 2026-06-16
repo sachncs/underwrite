@@ -22,10 +22,12 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -e '.[dev,risk,serve,postgres,otlp,vault,aws]'
-      - name: Lint
+      - name: Format check
         run: yapf --diff --recursive underwrite/ tests/
+      - name: Lint
+        run: ruff check underwrite/ tests/
       - name: Type check
-        run: mypy underwrite/
+        run: mypy underwrite/ tests/
       - name: Security audit
         run: bandit -r underwrite/ -c pyproject.toml
       - name: Dependency audit

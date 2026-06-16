@@ -116,3 +116,105 @@ class TestReportingService:
         report = svc.generate_report()
         assert report["total_originations"] == 0
         assert report["total_defaults"] == 0
+
+
+class TestReportingNpaReport:
+
+    def test_generate_npa_report_defaults(self) -> None:
+        svc = reporting()
+        report = svc.generate_npa_report()
+        assert report["report_type"] == "npa_detailed"
+        assert report["npa_principal"] == 0.0
+        assert report["npa_ratio"] == 0.0
+        assert report["total_provisioning"] == 0.0
+        assert report["provisioning_coverage_ratio"] == 0.0
+
+    def test_tracks_npa_bucket_changes(self) -> None:
+        svc = reporting()
+        svc.handle(
+            Event(
+                event_type=EventType.NPA_BUCKET_CHANGED,
+                source="npa",
+                payload={
+                    "borrower": "b1",
+                    "bucket": "substandard"
+                }))
+        report = svc.generate_npa_report()
+        assert report["bucket_counts"]["substandard"] == 1
+        assert report["bucket_counts"]["standard"] == 0
+
+    def test_tracks_provisioning_computed(self) -> None:
+        svc = reporting()
+        svc.handle(
+            Event(
+                event_type=EventType.PROVISIONING_COMPUTED,
+                source="npa",
+                payload={
+                    "borrower": "b2",
+                    "bucket": "substandard",
+                    "outstanding": 100000.0,
+                    "provisioning_rate": 0.15,
+                    "provisioning_amount": 15000.0,
+                }))
+        svc.handle(
+            Event(
+                event_type=EventType.PROVISIONING_COMPUTED,
+                source="npa",
+                payload={
+                    "borrower": "b3",
+                    "bucket": "loss",
+                    "outstanding": 50000.0,
+                    "provisioning_rate": 1.0,
+                    "provisioning_amount": 50000.0,
+                }))
+        report = svc.generate_npa_report()
+        assert report["total_provisioning"] == 65000.0
+        assert report["bucket_principals"]["loss"] == 50000.0
+        assert report["npa_principal"] == 150000.0
+
+    def test_provisioning_coverage_ratio(self) -> None:
+        svc = reporting()
+        svc.handle(
+            Event(
+                event_type=EventType.NPA_BUCKET_CHANGED,
+                source="npa",
+                payload={
+                    "borrower": "b4",
+                    "bucket": "substandard"
+                }))
+        svc.handle(
+            Event(
+                event_type=EventType.PROVISIONING_COMPUTED,
+                source="npa",
+                payload={
+                    "borrower": "b4",
+                    "bucket": "substandard",
+                    "outstanding": 100000.0,
+                    "provisioning_rate": 0.15,
+                    "provisioning_amount": 15000.0,
+                }))
+        report = svc.generate_npa_report()
+        assert report["provisioning_coverage_ratio"] == 0.15
+
+    def test_npa_ratio(self) -> None:
+        svc = reporting()
+        svc.handle(
+            Event(event_type=EventType.LOAN_ORIGINATED,
+                  source="test",
+                  payload={
+                      "borrower": "a",
+                      "principal": 500000
+                  }))
+        svc.handle(
+            Event(
+                event_type=EventType.PROVISIONING_COMPUTED,
+                source="npa",
+                payload={
+                    "borrower": "b5",
+                    "bucket": "doubtful",
+                    "outstanding": 50000.0,
+                    "provisioning_rate": 0.25,
+                    "provisioning_amount": 12500.0,
+                }))
+        report = svc.generate_npa_report()
+        assert report["npa_ratio"] == 0.1

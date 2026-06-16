@@ -21,6 +21,7 @@ class TestCommunicationService:
         keys = svc.store.keys("message:msg_alice@test.com_")
         assert len(keys) == 1
         rec = svc.store.get(keys[0])
+        assert rec is not None
         assert rec["recipient"] == "alice@test.com"
         assert rec["subject"] == "Welcome"
 
@@ -56,6 +57,7 @@ class TestCommunicationService:
         keys = svc.store.keys("message:")
         assert len(keys) == 1
         rec = svc.store.get(keys[0])
+        assert rec is not None
         assert rec["channel"] == "sms"
 
     def test_rejects_empty_recipient(self) -> None:

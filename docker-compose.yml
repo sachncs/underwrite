@@ -4,14 +4,77 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vault:
+        condition: service_started
     environment:
-      - UNDERWRITE_STORE_BACKEND=filesystem
+      - UNDERWRITE_STORE_BACKEND=postgres
+      - UNDERWRITE_STORE_DSN=postgresql://underwrite:underwrite@postgres:5432/underwrite
+      - UNDERWRITE_STORE_POOL_SIZE=10
+      - UNDERWRITE_BUS_BACKEND=local
+      - UNDERWRITE_BUS_RATE_LIMIT=500
+      - UNDERWRITE_BUS_MAX_WORKERS=8
+      - UNDERWRITE_LOG_LEVEL=INFO
+      - UNDERWRITE_LOG_FORMAT=json
+      - UNDERWRITE_METRICS_ENABLED=true
+      - UNDERWRITE_TRACING_ENABLED=true
+      - UNDERWRITE_TRACING_EXPORTER=otlp
+      - UNDERWRITE_SECRETS_BACKEND=vault
+      - UNDERWRITE_SECRETS_VAULT_URL=http://vault:8200
+      - UNDERWRITE_SECRETS_VAULT_TOKEN=${VAULT_TOKEN:-devroot}
+      - UNDERWRITE_SAGA_ENABLED=true
       - UNDERWRITE_DATA_DIR=/data
       - UNDERWRITE_API_TOKEN=${UNDERWRITE_API_TOKEN:-}
-      - VAULT_TOKEN=${VAULT_TOKEN:-}
+      - UNDERWRITE_AUTHZ_ENABLED=true
     volumes:
       - underwrite_data:/data
-    command: ["serve", "--services", "mechanism,audit,risk,fraud", "--rate-limit", "100"]
+    command: ["serve", "--host", "0.0.0.0", "--port", "8080", "--services", "mechanism,audit,risk,fraud,compliance,consent,kfs,pricing,recovery,credit_bureau,dsr,governance,npa,collection,servicing,payment,fee,notification,origination,underwriter,disbursement,settlement"]
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: underwrite
+      POSTGRES_PASSWORD: underwrite
+      POSTGRES_DB: underwrite
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U underwrite"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  vault:
+    image: hashicorp/vault:1.18
+    restart: unless-stopped
+    ports:
+      - "8200:8200"
+    cap_add:
+      - IPC_LOCK
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN:-devroot}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  otlp-collector:
+    image: otel/opentelemetry-collector-contrib:0.106.0
+    restart: unless-stopped
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    volumes:
+      - ./otel-collector.yml:/etc/otel-collector.yml:ro
+    command: ["--config", "/etc/otel-collector.yml"]
 
 volumes:
   underwrite_data:
+  postgres_data:

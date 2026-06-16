@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,7 +14,7 @@ from underwrite.__config__ import Configuration
 from underwrite.__events__ import Event
 from underwrite.__exceptions__ import ProtocolError
 from underwrite.__runtime__ import Runtime
-from underwrite.__store__ import CQRSStore, MemoryStore, PostgresStore, Store
+from underwrite.__store__ import CQRSStore, MemoryStore, PostgresStore, ReadStore, Store
 from underwrite.services.audit.service import AuditService
 from underwrite.services.base import NanoService
 from underwrite.services.mechanism.service import MechanismService
@@ -105,15 +106,13 @@ class TestRiskModelPredictFallback:
 
     def test_falls_back_on_strategy_exception(self) -> None:
         model = RiskModel()
-        model._RiskModel__strategy = _RaisingStrategy(
-        )  # type: ignore[attr-defined]
+        setattr(model, "_RiskModel__strategy", _RaisingStrategy())
         score = model.predict(10000.0, 12.0)
         assert 0.0 <= score <= 1.0
 
     def test_falls_back_for_extreme_input(self) -> None:
         model = RiskModel()
-        model._RiskModel__strategy = _RaisingStrategy(
-        )  # type: ignore[attr-defined]
+        setattr(model, "_RiskModel__strategy", _RaisingStrategy())
         score = model.predict(float("nan"), 12.0)
         assert isinstance(score, float)
         assert 0.0 <= score <= 1.0
@@ -196,7 +195,8 @@ class TestAuthzBuildFallback:
                 "policy_file": str(bad_policy),
             },
         }
-        rt = Runtime(config=Configuration(**config_data))
+        rt = Runtime(
+            config=Configuration(**config_data))  # type: ignore[arg-type]
         result = rt._Runtime__build_authz()  # type: ignore[attr-defined]
         assert result is None
 
@@ -208,7 +208,8 @@ class TestAuthzBuildFallback:
                 "policy_file": str(missing),
             },
         }
-        rt = Runtime(config=Configuration(**config_data))
+        rt = Runtime(
+            config=Configuration(**config_data))  # type: ignore[arg-type]
         result = rt._Runtime__build_authz()  # type: ignore[attr-defined]
         assert result is not None
 
@@ -240,7 +241,8 @@ class TestCQRSStoreHealthFallback:
         read_store = MemoryStore()
         write_store = MagicMock(spec=Store)
         write_store.health.side_effect = RuntimeError("write store down")
-        store = CQRSStore(read_store=read_store, write_store=write_store)
+        store = CQRSStore(read_store=cast(ReadStore, read_store),
+                          write_store=write_store)
         result = store.health()
         assert result["ok"] is False
         assert result["write_store"]["ok"] is False

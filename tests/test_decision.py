@@ -113,6 +113,7 @@ class TestDecisionService:
                   source="test",
                   payload={"application_id": "app_6"}))
         rec = svc.store.get("decision:app_6")
+        assert rec is not None
         assert rec["action"] == "reject"
         assert len(rec["signals"]) == 1
 
@@ -134,6 +135,7 @@ class TestDecisionService:
                   source="test",
                   payload={"application_id": "app_7"}))
         rec = svc.store.get("decision:app_7")
+        assert rec is not None
         assert rec["action"] == "approve"
 
     def test_ignores_events_without_entity_id(self) -> None:
@@ -155,6 +157,7 @@ class TestDecisionService:
                   source="test",
                   payload={"application_id": "x"}))
         rec = svc.store.get("decision:x")
+        assert rec is not None
         assert rec["action"] == "approve"
 
     def test_signal_count_in_payload(self) -> None:

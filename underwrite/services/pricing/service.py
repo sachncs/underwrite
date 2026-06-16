@@ -1,10 +1,14 @@
-"""Pricing — computes interest rates and fees based on risk profile.
+"""Pricing — RBI-compliant interest rate and fee computation.
 
-Listens for ``pricing.request`` events and emits ``pricing.computed``
-with the final rate and fee breakdown.
+Computes interest rates, fees, and all-in-cost APR per RBI Master
+Direction on Non-Banking Financial Company — Fair Practices Code
+(RBI/2021-22/95). Enforces rate caps, penal interest limits, and
+transparent fee disclosure for Indian retail lending.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from underwrite.__events__ import Event, EventType
 from underwrite.services import NanoService
@@ -12,28 +16,189 @@ from underwrite.validate import get_finite, get_non_empty
 
 BASE_RATE: float = 0.08
 RISK_PREMIUM_MULTIPLIER: float = 0.50
+HOME_LOAN_CAP: float = 0.12
+GOLD_LOAN_CAP: float = 0.18
+PERSONAL_LOAN_CAP: float = 0.28
+MICRO_LOAN_CAP: float = 0.30
+DEFAULT_LOAN_CAP: float = 0.30
+PENAL_INTEREST_CAP: float = 0.24
+MIN_PRINCIPAL_FOR_CAP: float = 50000.0
+
+
+def _compute_rate_cap(principal: float, loan_type: str = "personal") -> float:
+    if principal < MIN_PRINCIPAL_FOR_CAP:
+        return MICRO_LOAN_CAP
+    caps = {
+        "home": HOME_LOAN_CAP,
+        "gold": GOLD_LOAN_CAP,
+        "personal": PERSONAL_LOAN_CAP,
+        "micro": MICRO_LOAN_CAP,
+    }
+    return caps.get(loan_type, DEFAULT_LOAN_CAP)
 
 
 class PricingService(NanoService):
-    """Computes loan pricing (rate, fees) from risk score and principal."""
+    """Computes loan pricing with RBI-mandated rate caps and fee disclosure."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.__rate_cap: float = kwargs.pop("rate_cap", DEFAULT_LOAN_CAP)
+        self.__penal_interest_cap: float = kwargs.pop("penal_interest_cap",
+                                                       PENAL_INTEREST_CAP)
+        self.__has_risk_model: bool = kwargs.pop("has_risk_model", False)
+        super().__init__(**kwargs)
 
     def handle(self, event: Event) -> None:
-        if event.event_type != EventType.PRICING_REQUEST:
-            return
+        if event.event_type == EventType.PRICING_REQUEST:
+            self._compute_pricing(event)
+        elif event.event_type == "pricing.penal_interest":
+            self._compute_penal_interest(event)
+        elif event.event_type == "pricing.foreclosure":
+            self._compute_foreclosure(event)
+
+    def _compute_pricing(self, event: Event) -> None:
         p = event.payload
-        borrower: str = get_non_empty(p, "borrower")
-        principal: float = get_finite(p, "principal")
+        borrower: str = get_non_empty(p, "borrower", "")
+        principal: float = get_finite(p, "principal", 0.0)
         dp: float = get_finite(p, "default_probability", 0.02)
+        tenure_months: int = int(get_finite(p, "tenure_months", 12))
+        loan_type: str = p.get("loan_type", "personal")
+        credit_score: int = int(get_finite(p, "credit_score", 0))
+        annual_income: float = get_finite(p, "annual_income", 0.0)
 
         risk_premium: float = dp * RISK_PREMIUM_MULTIPLIER
         interest_rate: float = BASE_RATE + risk_premium
-        origination_fee: float = principal * 0.01
 
-        self.emit(EventType.PRICING_COMPUTED, {
+        rate_cap = _compute_rate_cap(principal, loan_type)
+        if interest_rate > rate_cap:
+            interest_rate = rate_cap
+
+        origination_fee_pct = self._origination_fee_pct(principal, loan_type)
+        origination_fee: float = principal * origination_fee_pct
+        processing_fee: float = self._processing_fee(principal)
+        gst_on_fees: float = round((origination_fee + processing_fee) * 0.18, 2)
+        total_upfront_fees: float = origination_fee + processing_fee + gst_on_fees
+
+        monthly_rate = interest_rate / 12.0
+        emi = self._compute_emi(principal, monthly_rate, tenure_months)
+        total_repayment = emi * tenure_months
+        total_interest = total_repayment - principal
+        apr = self._compute_apr(principal, emi, tenure_months,
+                                total_upfront_fees)
+
+        result: dict[str, Any] = {
             "borrower": borrower,
             "principal": principal,
             "interest_rate": round(interest_rate, 4),
+            "annual_percentage_rate": round(apr, 4),
+            "tenure_months": tenure_months,
+            "emi_amount": round(emi, 2),
+            "total_interest_payable": round(total_interest, 2),
+            "total_repayment": round(total_repayment, 2),
             "origination_fee": round(origination_fee, 2),
+            "origination_fee_pct": origination_fee_pct,
+            "processing_fee": round(processing_fee, 2),
+            "gst_on_fees": gst_on_fees,
+            "total_upfront_fees": round(total_upfront_fees, 2),
             "risk_premium": round(risk_premium, 4),
-        },
+            "rate_cap_applied": interest_rate >= rate_cap,
+            "loan_type": loan_type,
+            "penal_interest_annual_rate": self.__penal_interest_cap,
+        }
+
+        if credit_score > 0:
+            result["credit_score"] = credit_score
+        if annual_income > 0:
+            result["annual_income"] = annual_income
+            dti = (emi / annual_income * 12) if annual_income > 0 else 0
+            result["debt_to_income_ratio"] = round(dti, 4)
+
+        self.emit(EventType.PRICING_COMPUTED, result,
                   correlation_id=event.correlation_id)
+
+    def _compute_penal_interest(self, event: Event) -> None:
+        p = event.payload
+        borrower: str = get_non_empty(p, "borrower", "")
+        overdue_amount: float = get_finite(p, "overdue_amount", 0.0)
+        overdue_days: int = int(get_finite(p, "overdue_days", 0))
+
+        daily_penal_rate = self.__penal_interest_cap / 365.0
+        penal_amount = overdue_amount * daily_penal_rate * overdue_days
+
+        self.emit("pricing.penal_interest_computed", {
+            "borrower": borrower,
+            "overdue_amount": overdue_amount,
+            "overdue_days": overdue_days,
+            "penal_interest_rate": self.__penal_interest_cap,
+            "penal_interest_amount": round(penal_amount, 2),
+        }, correlation_id=event.correlation_id)
+
+    def _compute_foreclosure(self, event: Event) -> None:
+        p = event.payload
+        borrower: str = get_non_empty(p, "borrower", "")
+        outstanding_principal: float = get_finite(
+            p, "outstanding_principal", 0.0)
+        loan_type: str = p.get("loan_type", "personal")
+
+        foreclosure_charge_pct = self._foreclosure_charge_pct(loan_type)
+        foreclosure_amount = outstanding_principal * foreclosure_charge_pct
+        total_due = outstanding_principal + foreclosure_amount
+
+        self.emit("pricing.foreclosure_computed", {
+            "borrower": borrower,
+            "outstanding_principal": outstanding_principal,
+            "foreclosure_charge_pct": foreclosure_charge_pct,
+            "foreclosure_charge": round(foreclosure_amount, 2),
+            "total_due": round(total_due, 2),
+        }, correlation_id=event.correlation_id)
+
+    def _origination_fee_pct(self, principal: float, loan_type: str) -> float:
+        if loan_type == "home":
+            return 0.005
+        elif loan_type == "gold":
+            return 0.008
+        elif loan_type == "micro":
+            return 0.02 if principal < 10000 else 0.015
+        return 0.01
+
+    def _processing_fee(self, principal: float) -> float:
+        if principal <= 10000:
+            return 0.0
+        return min(principal * 0.0025, 5000.0)
+
+    def _foreclosure_charge_pct(self, loan_type: str) -> float:
+        if loan_type == "home":
+            return 0.0
+        elif loan_type in ("personal", "micro"):
+            return 0.05
+        return 0.04
+
+    @staticmethod
+    def _compute_emi(principal: float, monthly_rate: float,
+                     tenure_months: int) -> float:
+        if monthly_rate <= 0 or tenure_months <= 0:
+            return principal / max(tenure_months, 1)
+        factor = (1 + monthly_rate)**tenure_months
+        return principal * monthly_rate * factor / (factor - 1)
+
+    @staticmethod
+    def _compute_apr(principal: float, emi: float, tenure_months: int,
+                     total_fees: float) -> float:
+        net_principal = principal - total_fees
+        if net_principal <= 0 or emi <= 0 or tenure_months <= 0:
+            return 0.0
+        rate = 0.01
+        for _ in range(100):
+            factor = (1.0 + rate)**tenure_months
+            pv = emi * (factor - 1.0) / (rate * factor)
+            diff = pv - net_principal
+            if abs(diff) < 0.0001:
+                break
+            derivative = emi * ((1.0 + rate)**tenure_months *
+                                (1.0 - tenure_months * rate) -
+                                1.0) / (rate * rate * factor)
+            if derivative == 0:
+                break
+            rate -= diff / derivative
+            if rate <= 0:
+                rate = 0.0001
+        return rate * 12.0 * 100.0

@@ -1,0 +1,262 @@
+"""Indian holiday calendar for loan due-date adjustments.
+
+Provides gazetted holiday lists and utility functions to shift due
+dates to the next working day when they fall on a holiday or weekend.
+
+Follows RBI's list of bank holidays for clearing/settlement,
+modified for calendar year 2025-2026.
+"""
+
+from __future__ import annotations
+
+import calendar
+from datetime import date, timedelta
+
+
+def _fixed_holidays(start_year: int = 2025,
+                    end_year: int = 2027) -> set[tuple[int, int, int]]:
+    """Return set of (year, month, day) tuples for fixed-date holidays."""
+    holidays: set[tuple[int, int, int]] = set()
+    fixed = [
+        (1, 26),  # Republic Day
+        (8, 15),  # Independence Day
+        (10, 2),  # Gandhi Jayanti
+        (1, 1),  # New Year's Day
+        (5, 1),  # Labour Day / Maharashtra Day
+        (12, 25),  # Christmas
+    ]
+    for year in range(start_year, end_year + 1):
+        for month, day in fixed:
+            holidays.add((year, month, day))
+    return holidays
+
+
+def _moveable_holidays(start_year: int = 2025,
+                       end_year: int = 2027) -> set[tuple[int, int, int]]:
+    """Return set of (year, month, day) for moveable holidays.
+
+    These are approximate dates and should be updated annually based
+    on official RBI circulars.
+    """
+    known: dict[int, list[tuple[int, int, str]]] = {
+        2025: [(3, 14, "Holi"), (3, 31, "Eid-ul-Fitr"), (4, 6, "Ram Navami"),
+               (4, 10, "Mahavir Jayanti"), (4, 14, "Ambedkar Jayanti"),
+               (4, 18, "Good Friday"), (6, 8, "Eid-ul-Adha"),
+               (8, 16, "Janmashtami"), (9, 5, "Eid-e-Milad"),
+               (10, 1, "Dussehra"), (10, 20, "Diwali"),
+               (10, 22, "Diwali (Balipratipada)"), (11, 5, "Guru Nanak"),
+               (11, 24, "Kartik Purnima")],
+        2026: [(1, 14, "Makar Sankranti"), (1, 26, "Republic Day"),
+               (2, 17, "Maha Shivaratri"), (3, 20, "Holi"),
+               (3, 27, "Good Friday"), (3, 31, "Eid-ul-Fitr"),
+               (4, 14, "Ambedkar Jayanti"), (4, 21, "Ram Navami"),
+               (5, 1, "Maharashtra Day"), (5, 29, "Eid-ul-Adha"),
+               (7, 17, "Muharram"), (8, 15, "Independence Day"),
+               (8, 28, "Janmashtami"), (10, 2, "Gandhi Jayanti"),
+               (10, 19, "Dussehra"), (11, 7, "Diwali"), (11, 25, "Guru Nanak"),
+               (12, 25, "Christmas")],
+        2027: [(1, 1, "New Year"), (1, 14, "Makar Sankranti"), (3, 6, "Holi"),
+               (3, 21, "Eid-ul-Fitr"), (3, 26, "Good Friday"),
+               (4, 10, "Ram Navami"), (4, 14, "Ambedkar Jayanti"),
+               (5, 1, "Maharashtra Day"), (5, 18, "Eid-ul-Adha"),
+               (7, 6, "Muharram"), (8, 15, "Independence Day"),
+               (8, 16, "Janmashtami"), (10, 2, "Gandhi Jayanti"),
+               (10, 8, "Dussehra"), (10, 28, "Diwali"), (11, 15, "Guru Nanak"),
+               (12, 25, "Christmas")],
+    }
+    holidays: set[tuple[int, int, int]] = set()
+    for year in range(start_year, end_year + 1):
+        if year in known:
+            for month, day, _ in known[year]:
+                holidays.add((year, month, day))
+    return holidays
+
+
+_holiday_cache: dict[int, set[date]] = {}
+_holiday_generated: set[int] = set()
+
+
+def _ensure_holidays(year: int) -> None:
+    if year in _holiday_generated:
+        return
+    holidays: set[date] = set()
+    fixed = _fixed_holidays(year, year)
+    moveable = _moveable_holidays(year, year)
+    for y, m, d in fixed | moveable:
+        try:
+            holidays.add(date(y, m, d))
+        except ValueError:
+            pass
+    sundays_and_sats: set[date] = set()
+    for month in range(1, 13):
+        for day in range(1, calendar.monthrange(year, month)[1] + 1):
+            dt = date(year, month, day)
+            if dt.weekday() == 6:
+                sundays_and_sats.add(dt)
+            if dt.weekday() == 5 and (is_second_saturday(dt)
+                                      or is_fourth_saturday(dt)):
+                sundays_and_sats.add(dt)
+    _holiday_cache[year] = holidays | sundays_and_sats
+    _holiday_generated.add(year)
+
+
+def _weekly_holidays(year: int) -> set[date]:
+    """Return all Sundays for the given year."""
+    sundays: set[date] = set()
+    for month in range(1, 13):
+        for day in range(1, calendar.monthrange(year, month)[1] + 1):
+            d = date(year, month, day)
+            if d.weekday() == 6:
+                sundays.add(d)
+    return sundays
+
+
+def is_holiday(dt: date) -> bool:
+    """Check if a given date is a holiday (gazetted + Sunday).
+
+    Args:
+        dt: The date to check.
+
+    Returns:
+        True if the date is a holiday.
+    """
+    _ensure_holidays(dt.year)
+    return dt in _holiday_cache.get(dt.year, set())
+
+
+def is_business_day(dt: date) -> bool:
+    """Check if a given date is a business day (not holiday, not Sunday).
+
+    Args:
+        dt: The date to check.
+
+    Returns:
+        True if the date is a business day.
+    """
+    return not is_holiday(dt)
+
+
+def next_business_day(dt: date) -> date:
+    """Return the next business day from the given date.
+
+    If *dt* is already a business day, returns *dt*.
+    Otherwise, advances until a business day is found.
+
+    Args:
+        dt: Starting date.
+
+    Returns:
+        The next business day on or after *dt*.
+    """
+    while is_holiday(dt):
+        dt += timedelta(days=1)
+    return dt
+
+
+def previous_business_day(dt: date) -> date:
+    """Return the previous business day before the given date.
+
+    If *dt* is already a business day, returns *dt*.
+    Otherwise, goes back until a business day is found.
+
+    Args:
+        dt: Starting date.
+
+    Returns:
+        The previous business day on or before *dt*.
+    """
+    while is_holiday(dt):
+        dt -= timedelta(days=1)
+    return dt
+
+
+def adjust_due_date(dt: date, direction: str = "forward") -> date:
+    """Adjust a due date to fall on a business day.
+
+    Args:
+        dt: The original due date.
+        direction: 'forward' (next business day) or 'backward' (prev).
+
+    Returns:
+        Adjusted due date.
+    """
+    if direction == "forward":
+        return next_business_day(dt)
+    elif direction == "backward":
+        return previous_business_day(dt)
+    else:
+        raise ValueError(f"invalid direction: {direction!r}")
+
+
+def count_business_days(start: date, end: date) -> int:
+    """Count the number of business days between two dates (exclusive of end).
+
+    Args:
+        start: Start date (inclusive).
+        end: End date (exclusive).
+
+    Returns:
+        Number of business days.
+    """
+    count = 0
+    current = start
+    while current < end:
+        if is_business_day(current):
+            count += 1
+        current += timedelta(days=1)
+    return count
+
+
+def add_business_days(dt: date, days: int) -> date:
+    """Add a number of business days to a date.
+
+    Args:
+        dt: Starting date.
+        days: Number of business days to add (may be negative).
+
+    Returns:
+        The resulting date.
+    """
+    if days >= 0:
+        while days > 0:
+            dt += timedelta(days=1)
+            if is_business_day(dt):
+                days -= 1
+    else:
+        while days < 0:
+            dt -= timedelta(days=1)
+            if is_business_day(dt):
+                days += 1
+    return dt
+
+
+def is_second_saturday(dt: date) -> bool:
+    """Check if a date is the second Saturday of its month.
+
+    Some Indian banks treat second Saturdays as holidays.
+
+    Args:
+        dt: Date to check.
+
+    Returns:
+        True if it's a second Saturday.
+    """
+    if dt.weekday() != 5:
+        return False
+    return 8 <= dt.day <= 14
+
+
+def is_fourth_saturday(dt: date) -> bool:
+    """Check if a date is the fourth Saturday of its month.
+
+    Some Indian banks treat fourth Saturdays as holidays.
+
+    Args:
+        dt: Date to check.
+
+    Returns:
+        True if it's a fourth Saturday.
+    """
+    if dt.weekday() != 5:
+        return False
+    return 22 <= dt.day <= 28

@@ -22,6 +22,7 @@ class TestPaymentService:
         keys = svc.store.keys("payment:pay_L1_")
         assert len(keys) == 1
         rec = svc.store.get(keys[0])
+        assert rec is not None
         assert rec["loan_id"] == "L1"
         assert rec["amount"] == 500
 
@@ -76,6 +77,7 @@ class TestPaymentService:
                   }))
         key = "schedule:L1:2025-01-15"
         rec = svc.store.get(key)
+        assert rec is not None
         assert rec["loan_id"] == "L1"
         assert rec["status"] == "pending"
 
@@ -129,6 +131,7 @@ class TestPaymentService:
         assert len(received) >= 1
         key = f"schedule:L1:{past}"
         rec = svc2.store.get(key)
+        assert rec is not None
         assert rec["status"] == "overdue"
 
     def test_check_overdue_ignores_recent_payments(self) -> None:
@@ -194,3 +197,137 @@ class TestPaymentService:
                   }))
         keys = svc.store.keys("payment:pay_L1_")
         assert len(keys) == 3
+
+
+class TestPaymentServiceRazorpayBridging:
+
+    def test_razorpay_captured_emits_payment_received(self) -> None:
+        bus = LocalBus()
+        received: list = []
+        bus.subscribe(EventType.PAYMENT_RECEIVED, lambda e: received.append(e))
+        svc = PaymentService(service_id="payment", bus=bus)
+        bus.start()
+        svc.handle(
+            Event(
+                event_type=EventType.RAZORPAY_PAYMENT_CAPTURED,
+                source="razorpay",
+                payload={
+                    "loan_id": "L1",
+                    "payment_id": "pay_rzp_001",
+                    "amount": 5000.0,
+                    "method": "upi",
+                }))
+        assert len(received) == 1
+        payload = received[0].payload
+        assert payload["loan_id"] == "L1"
+        assert payload["amount"] == 5000.0
+        assert payload["payment_id"] == "pay_rzp_001"
+        assert payload.get("gateway") == "razorpay"
+
+    def test_razorpay_captured_stores_record(self) -> None:
+        svc = PaymentService(service_id="payment")
+        svc.handle(
+            Event(
+                event_type=EventType.RAZORPAY_PAYMENT_CAPTURED,
+                source="razorpay",
+                payload={
+                    "loan_id": "L2",
+                    "payment_id": "pay_rzp_002",
+                    "amount": 3000.0,
+                }))
+        rec = svc.store.get("razorpay_payment:pay_rzp_002")
+        assert rec is not None
+        assert rec["loan_id"] == "L2"
+        assert rec["amount"] == 3000.0
+        assert rec["status"] == "captured"
+
+    def test_razorpay_captured_no_loan_id_ignored(self) -> None:
+        bus = LocalBus()
+        received: list = []
+        bus.subscribe(EventType.PAYMENT_RECEIVED, lambda e: received.append(e))
+        svc = PaymentService(service_id="payment", bus=bus)
+        bus.start()
+        svc.handle(
+            Event(
+                event_type=EventType.RAZORPAY_PAYMENT_CAPTURED,
+                source="razorpay",
+                payload={
+                    "payment_id": "pay_rzp_no_loan",
+                    "amount": 1000.0,
+                }))
+        assert len(received) == 0
+
+    def test_razorpay_captured_zero_amount_ignored(self) -> None:
+        bus = LocalBus()
+        received: list = []
+        bus.subscribe(EventType.PAYMENT_RECEIVED, lambda e: received.append(e))
+        svc = PaymentService(service_id="payment", bus=bus)
+        bus.start()
+        svc.handle(
+            Event(
+                event_type=EventType.RAZORPAY_PAYMENT_CAPTURED,
+                source="razorpay",
+                payload={
+                    "loan_id": "L3",
+                    "payment_id": "pay_rzp_zero",
+                    "amount": 0.0,
+                }))
+        assert len(received) == 0
+
+    def test_razorpay_subscription_charged_emits_payment_received(
+            self) -> None:
+        bus = LocalBus()
+        received: list = []
+        bus.subscribe(EventType.PAYMENT_RECEIVED, lambda e: received.append(e))
+        svc = PaymentService(service_id="payment", bus=bus)
+        bus.start()
+        svc.handle(
+            Event(
+                event_type=EventType.RAZORPAY_SUBSCRIPTION_CHARGED,
+                source="razorpay",
+                payload={
+                    "loan_id": "L10",
+                    "subscription_id": "sub_monthly",
+                    "payment_id": "pay_sub_001",
+                    "amount": 2500.0,
+                }))
+        assert len(received) == 1
+        payload = received[0].payload
+        assert payload["loan_id"] == "L10"
+        assert payload["amount"] == 2500.0
+        assert payload.get("subscription_id") == "sub_monthly"
+
+    def test_razorpay_subscription_charged_stores_record(self) -> None:
+        svc = PaymentService(service_id="payment")
+        svc.handle(
+            Event(
+                event_type=EventType.RAZORPAY_SUBSCRIPTION_CHARGED,
+                source="razorpay",
+                payload={
+                    "loan_id": "L11",
+                    "subscription_id": "sub_emi",
+                    "payment_id": "pay_sub_002",
+                    "amount": 4500.0,
+                }))
+        rec = svc.store.get("razorpay_subscription:pay_sub_002")
+        assert rec is not None
+        assert rec["loan_id"] == "L11"
+        assert rec["amount"] == 4500.0
+        assert rec["status"] == "charged"
+
+    def test_razorpay_refund_stores_record(self) -> None:
+        svc = PaymentService(service_id="payment")
+        svc.handle(
+            Event(
+                event_type=EventType.RAZORPAY_PAYMENT_REFUNDED,
+                source="razorpay",
+                payload={
+                    "loan_id": "L20",
+                    "payment_id": "pay_refund_001",
+                    "amount": 1000.0,
+                }))
+        rec = svc.store.get("razorpay_refund:pay_refund_001")
+        assert rec is not None
+        assert rec["loan_id"] == "L20"
+        assert rec["amount"] == 1000.0
+        assert rec["status"] == "refunded"

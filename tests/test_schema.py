@@ -99,7 +99,9 @@ class TestSchemaRegistry:
                 "b": float
             }),
         )
-        assert registry.get("test.event").version == 2
+        result = registry.get("test.event")
+        assert result is not None
+        assert result.version == 2
 
     def test_contains(self) -> None:
         registry = SchemaRegistry()

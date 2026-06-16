@@ -96,7 +96,8 @@ def create_app(
     import asyncio as asyncio_mod
     import time as time_mod
 
-    token: str = (api_token or os.environ.get("UNDERWRITE_API_TOKEN", "") or "")
+    token: str = (api_token or os.environ.get("UNDERWRITE_API_TOKEN", "")
+                  or "")
     if require_auth and not token:
         raise ValueError(
             "UNDERWRITE_API_TOKEN must be set when --require-auth is used")
@@ -175,7 +176,8 @@ def create_app(
                 timeout=shutdown_timeout,
             )
         except asyncio.TimeoutError:
-            logger.warning("runtime stop timed out after %ds", shutdown_timeout)
+            logger.warning("runtime stop timed out after %ds",
+                           shutdown_timeout)
 
     # -- unversioned load-balancer probes ------------------------------------
 
@@ -259,7 +261,8 @@ def create_app(
                     payload=body.get("payload", {}),
                     correlation_id=body.get("correlation_id", ""),
                 )
-            return JSONResponse(status_code=202, content={"status": "accepted"})
+            return JSONResponse(status_code=202,
+                                content={"status": "accepted"})
         except ProtocolError:
             return __error_response(400, "invalid request")
         except Exception:

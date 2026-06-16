@@ -223,6 +223,87 @@ After rollback, `underwrite migrate` re-applies the migration.
 
 ---
 
+## Indian Regulatory Operations
+
+### NPA / SMA Monitoring
+
+The platform tracks asset quality per RBI Master Circular on Income Recognition and Asset Classification (IRAC):
+
+| Classification | Trigger | Event | Action |
+|---|---|---|---|
+| SMA-0 | 30 days past due | `sma.classified` | Alert relationship manager |
+| SMA-1 | 60 days past due | `sma.classified` | Initiate collection |
+| SMA-2 | 90 days past due | `sma.classified` | Prepare NPA report |
+| NPA (Substandard) | 91-180 days | `npa.bucket.changed` | Provision at 15%, suspend income recognition |
+| NPA (Doubtful) | 181-360 days | `npa.bucket.changed` | Provision at 25% (secured) |
+| NPA (Loss) | >360 days | `npa.bucket.changed` | Provision at 100% |
+| DLG Trigger | 120+ days | `npa.dlg.triggered` | Invoke default loss guarantee |
+
+Monitor NPA ratios:
+
+```bash
+# Check current NPA classification counts
+underwrite health | grep npa
+
+# Expected output:
+# service:npa — events_handled=42 sma0=5 sma1=2 sma2=1 npa_substandard=1
+```
+
+### Pricing Compliance Monitoring
+
+Monitor that all loans fall within RBI-mandated rate caps:
+
+```bash
+underwrite metrics | grep -E "pricing|caps|penal"
+```
+
+Key metrics:
+- `pricing.rate_caps` — count of rate cap applications
+- `pricing.penal_interest` — penal interest assessments (should be ≤24% p.a.)
+- `pricing.foreclosure` — foreclosure charge computations (0% for personal/home loans)
+
+### Consent Audit Trail
+
+All consent lifecycle events are recorded in the audit ledger:
+
+```bash
+# Query consent events (requires store inspection)
+underwrite dlq | grep consent
+```
+
+Monitor consent expiry and withdrawal rates to ensure DPDPA compliance.
+
+### DSR Fulfillment SLA
+
+The platform tracks DSR response times. If a DSR exceeds 30 days:
+
+1. `dsr.fulfilled` is not emitted — check `underwrite dlq` for pending requests
+2. Escalate via `grievance.logged` event
+3. Manually verify DPO notification (configured via `dpdpa.dsr.dpo_email`)
+
+### Breach Detection
+
+When `breach.detected` fires:
+
+1. Identify scope via audit log: `underwrite health` and check store
+2. Notify Data Protection Board within 72 hours (configurable)
+3. Record breach closure via `breach.closed` event
+4. Document in breach register
+
+### RBI Reporting Schedule
+
+| Report | Frequency | Data Source | Notes |
+|--------|-----------|-------------|-------|
+| NPA classification | Monthly | `npa.bucket.changed` events | RBI return on asset quality |
+| Capital adequacy | Quarterly | Store aggregation | Leverage ratio monitoring |
+| Interest rate disclosure | Monthly | Pricing service | Rate cap compliance report |
+| KFS issuance log | Daily | KFS service | Cooling-off period tracking |
+| Consent register | Monthly | Consent service | DPDPA compliance audit |
+| Grievance register | Monthly | DSR service | DPDPA Section 13 compliance |
+| Credit bureau data submission | Weekly | Credit bureau service | CIBIL/Experian/Equifax data refresh |
+
+---
+
 ## Monitoring
 
 ### Health

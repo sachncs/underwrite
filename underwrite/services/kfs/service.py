@@ -1,0 +1,183 @@
+"""Key Fact Statement (KFS) generation service.
+
+Generates Key Fact Statements per RBI Master Direction on KFS
+(RBI/2023-24/86, Master Direction DNBR. PD. 008/03.10.119/2023-24).
+
+A KFS includes:
+  - Loan amount (principal)
+  - Annual Percentage Rate (APR) / effective interest rate
+  - Tenure
+  - EMI amount with total interest payable
+  - Total repayment amount
+  - List of all fees and charges
+  - Late payment / penal interest terms
+  - Foreclosure / prepayment terms
+  - Cooling-off / cancellation period
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
+from decimal import Decimal
+from typing import Any
+
+from underwrite.__amortization__ import AmortizationSchedule, generate_schedule
+from underwrite.__events__ import Event, EventType
+from underwrite.__logger__ import logger
+from underwrite.services.base import NanoService
+from underwrite.validate import get_finite, get_non_empty
+
+DEFAULT_COOLING_OFF_DAYS = 3
+
+
+class KfsService(NanoService):
+    """Generates Key Fact Statements for loan products.
+
+    Produces a structured KFS document as specified by RBI guidelines,
+    including the annual percentage rate (APR), repayment schedule
+    summary, fee disclosure, and cooling-off terms.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.__cooling_off_days: int = kwargs.get("cooling_off_days",
+                                                  DEFAULT_COOLING_OFF_DAYS)
+
+    def handle(self, event: Event) -> None:
+        if event.event_type == EventType.KFS_GENERATE:
+            self.__on_kfs_generate(event)
+
+    def __on_kfs_generate(self, event: Event) -> None:
+        p = event.payload
+        loan_id: str = p.get("loan_id", "")
+        if not loan_id:
+            logger.warning("KFS_GENERATE missing loan_id, skipped")
+            return
+
+        borrower: str = get_non_empty(p, "borrower", "")
+        principal: float = get_finite(p, "principal", 0.0)
+        annual_rate: float = get_finite(p, "annual_rate", 0.0)
+        tenure_months: int = int(get_finite(p, "tenure_months", 1))
+        fees: list[dict[str, Any]] = p.get("fees", [])
+        start_date_str: str = p.get("start_date", "")
+
+        sd: date | None = None
+        if start_date_str:
+            try:
+                sd = date.fromisoformat(start_date_str)
+            except (ValueError, TypeError):
+                sd = None
+
+        try:
+            sched = generate_schedule(Decimal(str(principal)),
+                                      Decimal(str(annual_rate)),
+                                      tenure_months,
+                                      start_date=sd)
+        except Exception as exc:
+            logger.error("KFS schedule generation failed for loan %s: %s",
+                         loan_id, exc)
+            return
+
+        kfs = self.__build_kfs(loan_id, borrower, principal, annual_rate,
+                               tenure_months, sched, fees, sd)
+        self.emit(
+            EventType.KFS_GENERATED,
+            kfs,
+            correlation_id=event.correlation_id,
+        )
+
+    def __build_kfs(
+        self,
+        loan_id: str,
+        borrower: str,
+        principal: float,
+        annual_rate: float,
+        tenure_months: int,
+        sched: AmortizationSchedule,
+        fees: list[dict[str, Any]],
+        start_date: date | None = None,
+    ) -> dict[str, Any]:
+        """Build the KFS document data structure.
+
+        Args:
+            loan_id: Unique loan identifier.
+            borrower: Borrower identifier.
+            principal: Loan principal.
+            annual_rate: Annual interest rate in percent.
+            tenure_months: Loan tenure in months.
+            sched: Amortization schedule.
+            fees: List of fee dicts with type and amount.
+            start_date: Loan start date.
+
+        Returns:
+            KFS document as a dict.
+        """
+        total_fees = sum(f.get("amount", 0.0) for f in fees)
+        apr = self.__compute_apr(principal, sched.emi, tenure_months,
+                                 Decimal(str(total_fees)))
+        generated_at = datetime.now(timezone.utc).isoformat()
+
+        kfs: dict[str, Any] = {
+            "loan_id": loan_id,
+            "borrower": borrower,
+            "generated_at": generated_at,
+            "loan_amount": round(principal, 2),
+            "annual_interest_rate": annual_rate,
+            "annual_percentage_rate": round(float(apr), 2),
+            "tenure_months": tenure_months,
+            "emi_amount": float(sched.emi),
+            "total_interest_payable": float(sched.total_interest),
+            "total_repayment": float(sched.total_repayment),
+            "fees_and_charges": fees,
+            "total_fees": round(total_fees, 2),
+            "cooling_off_days": self.__cooling_off_days,
+        }
+        if start_date:
+            kfs["start_date"] = start_date.isoformat()
+        return kfs
+
+    def __compute_apr(self, principal: float, emi: Decimal, tenure_months: int,
+                      total_fees: Decimal) -> Decimal:
+        """Compute the Annual Percentage Rate (APR) including fees.
+
+        Uses the Newton-Raphson method to solve for the effective
+        monthly rate that equates the loan amount (principal - fees)
+        to the present value of all EMI payments.
+
+        Args:
+            principal: Loan principal.
+            emi: Monthly EMI amount.
+            tenure_months: Number of monthly payments.
+            total_fees: Total upfront fees deducted from principal.
+
+        Returns:
+            APR as a Decimal percentage (e.g. 13.5 for 13.5%).
+        """
+        net_principal = Decimal(str(principal)) - total_fees
+        if net_principal <= 0:
+            return Decimal("0")
+
+        emi_dec = emi
+        n = tenure_months
+
+        if emi_dec <= 0 or n <= 0:
+            return Decimal("0")
+
+        rate = Decimal("0.01")  # initial guess (1% monthly)
+        for _ in range(100):
+            factor = (Decimal("1") + rate)**n
+            pv = emi_dec * (factor - Decimal("1")) / (rate * factor)
+            diff = pv - net_principal
+            if abs(diff) < Decimal("0.0001"):
+                break
+            derivative = emi_dec * ((Decimal("1") + rate)**n *
+                                    (Decimal("1") - n * rate) -
+                                    Decimal("1")) / (rate * rate * factor)
+            if derivative == 0:
+                break
+            rate -= diff / derivative
+            if rate <= 0:
+                rate = Decimal("0.0001")
+
+        apr = rate * Decimal("1200")
+        return apr

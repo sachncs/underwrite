@@ -114,7 +114,8 @@ class ModalBus(EventBus):
                     raw = self.__modal_queue.get(block=False)
             except Exception:
                 if self.__running:
-                    logger.debug("modal poll got no message (expected during idle)")
+                    logger.debug(
+                        "modal poll got no message (expected during idle)")
                 pass
             if self.__running:
                 time.sleep(self.__poll_interval)
@@ -128,8 +129,8 @@ class ModalBus(EventBus):
         for sid, handler in wildcards + specific:
             if not self.__circuit_breaker.allow_request(sid):
                 logger.warning(
-                    "circuit open for subscriber %s, sending %s to DLQ",
-                    sid, event.event_type)
+                    "circuit open for subscriber %s, sending %s to DLQ", sid,
+                    event.event_type)
                 self.__dlq.put(event, "circuit_open", sid)
                 continue
             try:

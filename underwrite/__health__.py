@@ -43,8 +43,7 @@ class HealthRegistry:
             concurrent.futures.ThreadPoolExecutor(
                 max_workers=4,
                 thread_name_prefix="health",
-            )
-        )
+            ))
 
     def register(self, name: str, check: HealthCheck) -> None:
         """Registers a health check.

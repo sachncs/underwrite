@@ -238,6 +238,109 @@ handler at `max_ids_per_handler=100000`.  Duplicates are silently dropped.
 
 ---
 
+---
+
+## DPDPA 2023 Compliance (India)
+
+The platform is designed to support compliance with the Digital Personal Data Protection Act, 2023. Operationally, teams must configure and audit the following.
+
+### Consent Management
+
+The `ConsentService` manages consent lifecycle per DPDPA Chapter II requirements:
+
+- **Purpose-specific consent**: Each data processing purpose (KYC, credit bureau, loan servicing, collection, communication) requires separate consent.
+- **Validity period**: Configurable via `dpdpa.consent.consent_validity_days` (default 365 days). Expired consent triggers `consent.expired` events.
+- **Withdrawal**: Borrowers may withdraw consent at any time via `consent.withdrawn` event.
+- **Pre-check**: Compliance service performs consent pre-check before initiating KYC workflows.
+
+### Data Subject Rights (DSR)
+
+The `DataSubjectRightsService` handles DPDPA Chapter III data subject rights:
+
+| Right | DSR Type | Implementation |
+|---|---|---|
+| Right to access | `access` | Returns all stored personal data for the data subject |
+| Right to correction | `correction` | Updates inaccurate personal data |
+| Right to erasure | `erasure` | Purges personal data (subject to legal retention) |
+| Right to data portability | `portability` | Exports data in machine-readable format |
+| Right to grievance redressal | `grievance` | Escalates unresolved complaints to DPO |
+
+DSR fulfillment timeline: 30 days (configurable via `dpdpa.dsr.response_time_days`). Grievance resolution: 15 days (configurable via `dpdpa.dsr.grievance_response_days`).
+
+### Data Retention
+
+Configured via `dpdpa` config:
+- **General data**: 8 years (`data_retention_years`) per IT Act record-keeping requirements
+- **KYC data**: 5 years (`kyc_retention_years`) per PMLA rules
+- **Auto-purge**: Optional (`enable_auto_purge`) — when enabled, expired data is automatically purged with `data.purged` event emission
+
+### Breach Notification
+
+Per DPDPA Section 8, the platform supports breach lifecycle:
+
+1. **Detection**: `breach.detected` event emitted on potential breach identification
+2. **Notification**: `breach.notified` emitted within 72 hours (configurable via `dpdpa.breach_notification_hours`) to the Data Protection Board and affected data subjects
+3. **Closure**: `breach.closed` emitted after investigation and remediation
+
+### Grievance Redressal
+
+The platform tracks complaints via the grievance event flow:
+- `grievance.logged` — complaint received from data subject
+- `grievance.resolved` — complaint addressed within 15-day window
+
+DPO contact information is configured via `dpdpa.dsr.dpo_email` and `dpdpa.dsr.dpo_phone`.
+
+### Data Localization
+
+All data is stored in-context:
+- **Store backend**: Postgres or Filesystem — no cross-border data transfer
+- **Audit ledger**: In-process event ledger with optional export
+- **Logging**: Structured JSON logs with PII redaction before output
+- **No external analytics**: No third-party analytics or tracking SDKs
+
+For Indian cloud deployment, deploy store and application in the same Indian region (AWS `ap-south-1`, Azure Central India, or GCP `asia-south1`).
+
+### PII Redation
+
+**Module:** `underwrite/__pii.py`
+
+In addition to the field-based and value-based redaction described above, the redactor handles Indian PII identifiers:
+
+- **Aadhaar**: 12-digit numbers (masked to last 4 digits)
+- **PAN**: `[A-Z]{5}[0-9]{4}[A-Z]` format (masked to last 4 characters)
+- **Voter ID**: EPIC format
+- **Passport**: International passport format
+- **Bank account**: Account number + IFSC combination
+- **Phone / Email**: Contact identifiers
+
+Redaction is applied by **AuditService** before event persistence and by the **JSON log formatter** before output.
+
+### Full-Page PII and Data Protection Diagram
+
+```mermaid
+flowchart TD
+    DP["Data Principal (Borrower)"] -->|Provides consent| CS["ConsentService"]
+    DP -->|Exercises rights| DSRS["DataSubjectRightsService"]
+    CS -->|consent.recorded| Audit
+    DSRS -->|dsr.fulfilled| Audit
+
+    subgraph "Data Protection Layer"
+        CS
+        DSRS
+        BD["BreachDetector"]
+        GR["GrievanceTracker"]
+        PP["AutoPurge"]
+    end
+
+    BD -->|breach.detected| Audit
+    GR -->|grievance.logged| Audit
+    PP -->|data.purged| Audit
+
+    Audit -->|PII-redacted| Ledger
+```
+
+---
+
 ## Security Checklist
 
 - [ ] **Enable authorization**: Set `authz.enabled=true` in config.
@@ -253,3 +356,8 @@ handler at `max_ids_per_handler=100000`.  Duplicates are silently dropped.
       risk models.
 - [ ] **Restrict joblib**: Never set `UNDERWRITE_ALLOW_JOBLIB=true`
       unless you control the model file.
+- [ ] **Configure consent management**: Set `dpdpa.consent.required_purposes` for all data processing purposes.
+- [ ] **Set DPO contact**: Configure `dpdpa.dsr.dpo_email` for grievance redressal.
+- [ ] **Configure data retention**: Set `dpdpa.data_retention_years` and `dpdpa.kyc_retention_years` per compliance requirements.
+- [ ] **Enable breach detection**: Ensure `dpdpa.enable_breach_detection=true`.
+- [ ] **Deploy in Indian region**: Store and compute in AWS `ap-south-1`, Azure Central India, or GCP `asia-south1`.

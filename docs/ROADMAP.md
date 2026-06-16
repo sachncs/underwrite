@@ -4,19 +4,20 @@ Based on `TODO.md` (production readiness score: 57/100) and codebase analysis.
 
 ---
 
-## Short-term — v0.2.0 (~1 week)
+## Short-term — v0.2.0 — Indian Regulatory Compliance (2 weeks)
 
-| Priority | Item | Files | Est. |
-|----------|------|-------|------|
-| Critical | Exclude `token` from `Configuration.to_dict()` (CD2) | `__config__.py:465-470` | 15m |
-| Critical | Fix path traversal in `FileStore.__path` (CD4 / HD6) | `__store__.py:244-253` | 30m |
-| Critical | Bound `FraudService.__records` with `deque(maxlen=100000)` (HD3) | `services/fraud/service.py:25` | 15m |
-| High | Add warning logs for silent returns in governance, fee, saga | Multiple files | 30m |
-| High | Add `__all__` to modules missing it (`__health__`, `__serve__`, `__runtime__`, `__migrate__`) | 4 modules | 15m |
-| High | Fix env var type coercion in `Configuration.__apply_env_overrides` (MD5) | `__config__.py:609-613` | 30m |
-| High | Add structured logging with correlation ID context | `__runtime__.py:65-101` | 2h |
-| High | Add `PrometheusMiddleware` import-failure warning (HD8) | `__serve__.py:24-29` | 10m |
-| Medium | `ServiceSupervisor.shutdown()` for `FileStore` thread cleanup (CD5) | `__store__.py:157` | 15m |
+| Priority | Item | Est. |
+|----------|------|------|
+| Critical | Real PAN verification API integration (NSDL/ITD) | 2d |
+| Critical | Real Aadhaar verification API integration (UIDAI) | 2d |
+| Critical | Real CIBIL credit report API integration | 2d |
+| High | Real-time AML screening integration (OFSAC/UNSC/domestic blocklist) | 2d |
+| High | KFS template generation (Hindi + English per RBI DLG) | 2d |
+| High | E-mandate / e-NACH integration with Razorpay | 2d |
+| High | Video KYC provider integration (e.g., Digilocker, NSDL) | 3d |
+| Medium | Grievance portal webhook integration | 1d |
+| Medium | Breach notification template (DPDPA Section 8) | 1d |
+| Medium | Data retention batch auto-purge job | 2d |
 
 ## Medium-term — v0.3.0 (~2 weeks)
 
@@ -25,22 +26,25 @@ Based on `TODO.md` (production readiness score: 57/100) and codebase analysis.
 | High | Saga persistence via Store backend (in-memory only today) | 3-4h |
 | High | Prometheus `/metrics` endpoint at standard path | 2h |
 | High | Async event bus (`asyncio`) implementation | 4-6h |
+| High | RBI monthly/quarterly reporting auto-generation | 2d |
 | Medium | Configuration validation at Runtime startup (not just load) | 1h |
 | Medium | Delegation chain depth limit in `__required_delegation` (MD3) | 30m |
 | Medium | `FileStore.keys()` pagination (MD2) | 1h |
+| Medium | Indian language document generation (Hindi, Marathi, Tamil) | 2d |
 | Low | `tox.ini` for local matrix testing | 30m |
-| Low | `.env.example` for local dev | 15m |
 
 ## Long-term — v0.4.0 ~ v0.5.0 (~4 weeks)
 
 | Priority | Feature | Est. |
 |----------|---------|------|
 | High | FastAPI OTLP auto-instrumentation (`opentelemetry-instrumentation-fastapi`) | 2h |
+| High | RBI audit trail export (XBRL format for regulatory filings) | 2d |
 | Medium | Config-driven fee schedules (replace `FEE_SCHEDULES` module-level dict) | 2h |
 | Medium | Plugin-based model loading (strategy pattern for risk models) | 3h |
 | Medium | Distributed rate limiting (`DistributedRateLimiter` with Store backend) | 2h |
 | Medium | DLQ persistence + replay automation (CLI command) | 2h |
 | Medium | PyPI publishing CI (GitHub Actions release workflow) | 1h |
+| Medium | MeitY-empanelled cloud provider deployment guide | 1d |
 | Low | Structured audit export to S3/GCS | 4h |
 | Low | JSON Schema enforcement at runtime | 2h |
 

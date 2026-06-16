@@ -6,6 +6,8 @@ Tests verify the complete pipeline: Runtime.publish() → bus → dispatch
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from underwrite.__config__ import Configuration
 from underwrite.__events__ import Event, EventType
 from underwrite.__runtime__ import Runtime
@@ -43,7 +45,7 @@ class TestPublishFlow:
         audit = rt.get("audit")
         assert audit is not None
         records = [
-            e for e in audit.ledger
+            e for e in audit.ledger  # type: ignore[attr-defined]
             if e["event_type"] == EventType.LOAN_ORIGINATED
         ]
         assert len(records) == 1
@@ -86,7 +88,8 @@ class TestPublishFlow:
                     "base_budget": 200000
                 },
             ))
-        audit = rt.get("audit")
+        audit = cast(Any, rt.get("audit"))
+        assert audit is not None
         seed_events = [
             e for e in audit.ledger if e["event_type"] == EventType.SEED_ADDED
         ]
@@ -106,6 +109,7 @@ class TestPublishFlow:
         bus.start()
         rt.start(["mechanism"])
         svc = rt.get("mechanism")
+        assert svc is not None
         svc.handle(
             Event(
                 event_type="mechanism",
@@ -130,6 +134,7 @@ class TestPublishFlow:
         bus.start()
         rt.start(["mechanism", "audit"])
         svc = rt.get("mechanism")
+        assert svc is not None
         svc.handle(
             Event(
                 event_type="mechanism",
@@ -140,7 +145,7 @@ class TestPublishFlow:
                     "base_budget": 400000
                 },
             ))
-        audit = rt.get("audit")
+        audit = cast(Any, rt.get("audit"))
         assert audit is not None
         seed_records = audit.events_by_type(EventType.SEED_ADDED)
         assert len(seed_records) >= 1
@@ -202,6 +207,7 @@ class TestMetricsE2E:
         bus.start()
         rt.start(["mechanism"])
         svc = rt.get("mechanism")
+        assert svc is not None
         svc.handle(
             Event(
                 event_type="mechanism",
@@ -212,10 +218,12 @@ class TestMetricsE2E:
                     "base_budget": 50000
                 },
             ))
+        assert rt.metrics is not None
         snap = rt.metrics.snapshot()
         counters = snap.get("counters", {})
         emitted_key = next(
-            (k for k in counters if "events.emitted" in k and "mechanism" in k),
+            (k
+             for k in counters if "events.emitted" in k and "mechanism" in k),
             None)
         assert emitted_key is not None
         rt.stop()
@@ -234,9 +242,13 @@ class TestGracefulShutdownE2E:
         rt.wire("mechanism")
         bus.start()
         rt.start(["mechanism"])
-        assert rt.get("mechanism").is_running
+        svc = rt.get("mechanism")
+        assert svc is not None
+        assert svc.is_running
         rt.stop()
-        assert rt.get("mechanism").is_running is False
+        svc = rt.get("mechanism")
+        assert svc is not None
+        assert svc.is_running is False
 
     def test_stop_idempotent(self) -> None:
         rt = Runtime()
@@ -246,7 +258,9 @@ class TestGracefulShutdownE2E:
         rt.stop()
         rt.stop()
         rt.stop()
-        assert rt.get("mechanism").is_running is False
+        svc = rt.get("mechanism")
+        assert svc is not None
+        assert svc.is_running is False
 
     def test_stop_with_no_services(self) -> None:
         rt = Runtime()
@@ -265,9 +279,14 @@ class TestMultipleServiceCoordination:
         rt.wire("audit")
         bus.start()
         rt.start(["mechanism", "audit"])
-        assert rt.get("mechanism").is_running
-        assert rt.get("audit").is_running
+        mech_svc = rt.get("mechanism")
+        assert mech_svc is not None
+        assert mech_svc.is_running
+        audit_svc = rt.get("audit")
+        assert audit_svc is not None
+        assert audit_svc.is_running
         svc = rt.get("mechanism")
+        assert svc is not None
         svc.handle(
             Event(
                 event_type="mechanism",
@@ -279,10 +298,15 @@ class TestMultipleServiceCoordination:
                 },
             ))
         audit = rt.get("audit")
-        assert len(audit.ledger) >= 1
+        assert audit is not None
+        assert len(audit.ledger) >= 1  # type: ignore[attr-defined]
         rt.stop()
-        assert rt.get("mechanism").is_running is False
-        assert rt.get("audit").is_running is False
+        mech_svc = rt.get("mechanism")
+        assert mech_svc is not None
+        assert mech_svc.is_running is False
+        audit_svc = rt.get("audit")
+        assert audit_svc is not None
+        assert audit_svc.is_running is False
 
     def test_store_shared_between_services(self) -> None:
         rt = memory_runtime()
@@ -294,6 +318,7 @@ class TestMultipleServiceCoordination:
         bus.start()
         rt.start(["mechanism", "audit"])
         mech_svc = rt.get("mechanism")
+        assert mech_svc is not None
         mech_svc.handle(
             Event(
                 event_type="mechanism",
@@ -305,6 +330,7 @@ class TestMultipleServiceCoordination:
                 },
             ))
         audit_svc = rt.get("audit")
+        assert audit_svc is not None
         state_from_mech = mech_svc.store.get("protocol:state")
         state_from_audit = audit_svc.store.get("protocol:state")
         assert state_from_mech is not None

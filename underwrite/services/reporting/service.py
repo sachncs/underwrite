@@ -1,4 +1,8 @@
-"""RBI regulatory reporting — generates reports from audit data."""
+"""RBI regulatory reporting — generates reports from audit data.
+
+Tracks portfolio-level metrics and NPA bucket-wise breakdowns
+for regulatory reporting under RBI Master Circulars.
+"""
 
 from __future__ import annotations
 
@@ -12,13 +16,31 @@ from underwrite.validate import get_finite
 
 
 class ReportingService(StatefulService):
-    """Generates regulatory reports (RBI, internal) from the audit trail."""
+    """Generates regulatory reports (RBI, internal) from the audit trail.
+
+    Accumulates portfolio-wide counters as well as NPA bucket-wise
+    distributions (standard, substandard, doubtful, loss) so that
+    provisioning coverage ratios and portfolio health can be reported.
+    """
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.__originations: int = 0
         self.__defaults: int = 0
         self.__total_principal: float = 0.0
+        self.__bucket_counts: dict[str, int] = {
+            "standard": 0,
+            "substandard": 0,
+            "doubtful": 0,
+            "loss": 0,
+        }
+        self.__bucket_principals: dict[str, float] = {
+            "standard": 0.0,
+            "substandard": 0.0,
+            "doubtful": 0.0,
+            "loss": 0.0,
+        }
+        self.__provisioning_total: float = 0.0
         self._repo: TypedStoreRepository[dict[str, Any]] = self.store_repo(
             "counters", dict)
         loaded = self._repo.load(default={})
@@ -31,16 +53,43 @@ class ReportingService(StatefulService):
         if event.event_type == EventType.LOAN_ORIGINATED:
             with self.state_lock:
                 self.__originations += 1
-                self.__total_principal += get_finite(event.payload, "principal")
+                self.__total_principal += get_finite(event.payload,
+                                                      "principal")
                 self.__sync()
         elif event.event_type == EventType.DEFAULT_OCCURRED:
             with self.state_lock:
                 self.__defaults += 1
                 self.__sync()
+        elif event.event_type == EventType.NPA_BUCKET_CHANGED:
+            self._track_bucket_change(event)
+        elif event.event_type == EventType.PROVISIONING_COMPUTED:
+            self._track_provisioning(event)
+
+    def _track_bucket_change(self, event: Event) -> None:
+        """Update bucket-wise counters when NPA classification changes."""
+        borrower: str = event.payload.get("borrower", "")
+        bucket: str = event.payload.get("bucket", "standard")
+        if not borrower or bucket not in self.__bucket_counts:
+            return
+        with self.state_lock:
+            self.__bucket_counts[bucket] = self.__bucket_counts.get(
+                bucket, 0) + 1
+
+    def _track_provisioning(self, event: Event) -> None:
+        """Track total provisioning amount."""
+        amount: float = get_finite(event.payload, "provisioning_amount",
+                                   0.0)
+        bucket: str = event.payload.get("bucket", "")
+        principal: float = get_finite(event.payload, "outstanding", 0.0)
+        if bucket not in self.__bucket_principals:
+            return
+        with self.state_lock:
+            self.__bucket_principals[bucket] = principal
+            self.__provisioning_total += amount
 
     def generate_report(self,
                         report_type: str = "portfolio_summary"
-                       ) -> dict[str, Any]:
+                        ) -> dict[str, Any]:
         """Generate a regulatory report from accumulated metrics.
 
         Args:
@@ -48,16 +97,55 @@ class ReportingService(StatefulService):
 
         Returns:
             Dict with report_type, generated_at, total_originations,
-            total_defaults, total_principal_originated, and default_rate.
+            total_defaults, total_principal_originated, default_rate,
+            and portfolio health metrics.
         """
         return {
-            "report_type": report_type,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "total_originations": self.__originations,
-            "total_defaults": self.__defaults,
-            "total_principal_originated": self.__total_principal,
-            "default_rate": self.__defaults / max(self.__originations, 1),
+            "report_type":
+            report_type,
+            "generated_at":
+            datetime.now(timezone.utc).isoformat(),
+            "total_originations":
+            self.__originations,
+            "total_defaults":
+            self.__defaults,
+            "total_principal_originated":
+            self.__total_principal,
+            "default_rate":
+            self.__defaults / max(self.__originations, 1),
         }
+
+    def generate_npa_report(self) -> dict[str, Any]:
+        """Generate an NPA-specific regulatory report.
+
+        Returns bucket-wise counts, outstanding principals, and
+        provisioning coverage information.
+        """
+        with self.state_lock:
+            npa_principal = (self.__bucket_principals.get("substandard",
+                                                          0.0)
+                             + self.__bucket_principals.get("doubtful", 0.0)
+                             + self.__bucket_principals.get("loss", 0.0))
+            total = self.__total_principal or 1.0
+            return {
+                "report_type":
+                "npa_detailed",
+                "generated_at":
+                datetime.now(timezone.utc).isoformat(),
+                "bucket_counts":
+                dict(self.__bucket_counts),
+                "bucket_principals":
+                dict(self.__bucket_principals),
+                "npa_principal":
+                npa_principal,
+                "npa_ratio":
+                round(npa_principal / total, 6),
+                "total_provisioning":
+                round(self.__provisioning_total, 2),
+                "provisioning_coverage_ratio":
+                round(self.__provisioning_total /
+                      max(npa_principal, 1.0), 6),
+            }
 
     # -- state persistence ---------------------------------------------------
 

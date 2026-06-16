@@ -52,9 +52,60 @@ curl -sf http://localhost:8000/healthz | python -m json.tool
 
 ---
 
+## India Cloud Deployment
+
+### AWS (ap-south-1 — Mumbai)
+
+```yaml
+# Kubernetes nodeSelector for Indian data residency
+nodeSelector:
+  topology.kubernetes.io/region: ap-south-1
+
+# RDS PostgreSQL in Mumbai region
+store:
+  backend: postgres
+  dsn: postgresql://user:pass@underwrite.cluster-xxx.ap-south-1.rds.amazonaws.com:5432/underwrite
+```
+
+### Azure (Central India)
+
+```yaml
+nodeSelector:
+  topology.kubernetes.io/region: centralindia
+
+# Azure Database for PostgreSQL
+store:
+  backend: postgres
+  dsn: postgresql://user:pass@underwrite.postgres.database.azure.com:5432/underwrite
+```
+
+### GCP (asia-south1 — Mumbai)
+
+```yaml
+nodeSelector:
+  topology.kubernetes.io/region: asia-south1
+
+# Cloud SQL PostgreSQL
+store:
+  backend: postgres
+  dsn: postgresql://user:pass@10.x.x.x:5432/underwrite
+```
+
+### Data Localisation Requirements
+
+All deployment targets must ensure:
+- **Compute and storage** in the same Indian region (no cross-border data transfer)
+- **Secrets backend** (Vault/AWS SM) also in-region
+- **Event bus** (SQS/Modal) regional endpoint
+- **Monitoring** (OTLP collector, metrics) in-region
+
+For MeitY-empanelled cloud providers, refer to the [MeitY Cloud Framework](https://www.meity.gov.in/cloud-framework).
+
+---
+
 ## Docker Compose
 
-`docker-compose.yml` configures a filesystem-backed deployment with persistent volumes:
+`docker-compose.yml` configures a production-grade deployment with PostgreSQL 16, HashiCorp Vault, and OpenTelemetry Collector:
 
 ```yaml
 services:
@@ -64,19 +115,55 @@ services:
     ports:
       - "8000:8080"
     environment:
-      - UNDERWRITE_STORE_BACKEND=filesystem
-      - UNDERWRITE_DATA_DIR=/data
+      - UNDERWRITE_STORE_BACKEND=postgres
+      - UNDERWRITE_STORE_DSN=postgresql://underwrite:${POSTGRES_PASSWORD}@postgres:5432/underwrite
+      - UNDERWRITE_SECRETS_BACKEND=vault
+      - UNDERWRITE_SECRETS_VAULT_URL=http://vault:8200
+      - UNDERWRITE_TRACING_ENABLED=true
+      - UNDERWRITE_TRACING_EXPORTER=otlp
       - UNDERWRITE_API_TOKEN=${UNDERWRITE_API_TOKEN:-}
-      - VAULT_TOKEN=${VAULT_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+    command: ["serve", "--services", "mechanism,audit,risk,fraud,compliance,pricing,consent,kfs,credit_bureau,underwriter,decision", "--rate-limit", "100"]
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: underwrite
+      POSTGRES_USER: underwrite
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - underwrite_data:/data
-    command: ["serve", "--services", "mechanism,audit,risk,fraud", "--rate-limit", "100"]
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U underwrite"]
+
+  vault:
+    image: hashicorp/vault:latest
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otel-collector.yml"]
+    volumes:
+      - ./otel-collector.yml:/etc/otel-collector.yml
+    ports:
+      - "4317:4317"  # OTLP gRPC
+      - "4318:4318"  # OTLP HTTP
 ```
 
 Start:
 
 ```bash
-UNDERWRITE_API_TOKEN=prod-token docker compose up -d
+POSTGRES_PASSWORD=changeme VAULT_TOKEN=dev-token UNDERWRITE_API_TOKEN=prod-token docker compose up -d
 ```
 
 ---

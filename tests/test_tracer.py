@@ -51,7 +51,8 @@ class TestTracer:
             def export(self, spans: list) -> None:
                 exported.extend(spans)
 
-        t = Tracer(service_id="test", exporter=CaptureExporter())
+        t = Tracer(service_id="test",
+                   exporter=CaptureExporter())  # type: ignore[arg-type]
         span = t.start_span("op1")
         t.end_span(span)
         assert len(exported) == 1
@@ -85,7 +86,10 @@ class TestTracer:
             def export(self, spans: list) -> None:
                 exported.append(len(spans))
 
-        t = Tracer(service_id="test", exporter=CaptureExporter(), max_spans=2)
+        t = Tracer(
+            service_id="test",
+            exporter=CaptureExporter(),  # type: ignore[arg-type]
+            max_spans=2)
         for i in range(4):
             span = t.start_span(f"op{i}")
             t.end_span(span)

@@ -19,12 +19,19 @@ __all__ = [
     "AuditConfig",
     "BusConfig",
     "Configuration",
+    "ConsentConfig",
+    "CreditBureauConfig",
+    "DpdpaConfig",
+    "DsrConfig",
     "FeeConfig",
     "GovernanceConfig",
     "IdentityConfig",
+    "KfsConfig",
     "LoggingConfig",
     "MetricsConfig",
     "MigrationConfig",
+    "NpaConfig",
+    "RazorpayConfig",
     "RecoveryConfig",
     "SagaConfig",
     "SecretsConfig",
@@ -32,6 +39,7 @@ __all__ = [
     "ServiceConfig",
     "StoreConfig",
     "TracingConfig",
+    "UnderwritingConfig",
 ]
 
 import json
@@ -77,7 +85,8 @@ class BusConfig(ForbidExtra):
     def check_backend(cls, v: str) -> str:
         allowed = {"local", "sqs", "modal"}
         if v not in allowed:
-            raise ValueError(f"bus.backend must be one of {allowed}, got {v!r}")
+            raise ValueError(
+                f"bus.backend must be one of {allowed}, got {v!r}")
         return v
 
 
@@ -205,6 +214,132 @@ class FeeConfig(ForbidExtra):
             "prepayment": 0.005,
             "service": 5.0,
         })
+    penal_interest_daily_rate: float = Field(default=0.0, ge=0.0, le=100.0)
+    late_payment_percent: float = Field(default=0.0, ge=0.0, le=100.0)
+    max_penal_interest_per_loan: float = Field(default=0.0, ge=0.0)
+
+
+class KfsConfig(ForbidExtra):
+    """KFS (Key Fact Statement) configuration per RBI guidelines."""
+
+    enabled: bool = Field(default=True)
+    template_dir: str = ""
+    annual_interest_rate_disclosure: str = "annual_reducing"
+    include_foreclosure_terms: bool = Field(default=True)
+    include_late_fee_disclosure: bool = Field(default=True)
+
+
+class NpaConfig(ForbidExtra):
+    """NPA asset classification and provisioning configuration per RBI norms.
+
+    Covers SMA (Special Mention Account) triggers, provisioning
+    percentages per bucket, and DLG (Debt Liquidation Guarantee)
+    threshold.
+    """
+
+    standard_provisioning_rate: float = Field(default=0.0025, ge=0.0, le=1.0)
+    substandard_provisioning_rate: float = Field(default=0.15, ge=0.0, le=1.0)
+    doubtful_provisioning_rate_secured: float = Field(default=0.25, ge=0.0, le=1.0)
+    loss_provisioning_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+    sma_0_days: int = Field(default=30, ge=1)
+    sma_1_days: int = Field(default=60, ge=1)
+    sma_2_days: int = Field(default=90, ge=1)
+    npa_days: int = Field(default=90, ge=1)
+    dlg_trigger_days: int = Field(default=120, ge=1)
+
+
+class ConsentConfig(ForbidExtra):
+    """Consent management configuration per DPDPA 2023."""
+
+    required_purposes: list[str] = Field(
+        default_factory=lambda: [
+            "kyc_verification",
+            "credit_bureau_reporting",
+            "loan_servicing",
+            "collection",
+            "communication_transactional",
+        ])
+    consent_validity_days: int = Field(default=365, ge=1)
+    withdrawal_cooldown_days: int = Field(default=0, ge=0)
+
+
+class DsrConfig(ForbidExtra):
+    """Data Subject Rights configuration per DPDPA 2023."""
+
+    response_time_days: int = Field(default=30, ge=1)
+    grievance_response_days: int = Field(default=15, ge=1)
+    dpo_email: str = ""
+    dpo_phone: str = ""
+
+
+class DpdpaConfig(ForbidExtra):
+    """Top-level DPDPA 2023 (India) data protection configuration."""
+
+    consent: ConsentConfig = Field(default_factory=ConsentConfig)
+    dsr: DsrConfig = Field(default_factory=DsrConfig)
+    data_retention_years: int = Field(default=8, ge=1)
+    kyc_retention_years: int = Field(default=5, ge=1)
+    breach_notification_hours: int = Field(default=72, ge=1)
+    enable_breach_detection: bool = Field(default=True)
+    enable_auto_purge: bool = Field(default=False)
+
+
+class RazorpayConfig(ForbidExtra):
+    """Razorpay payment gateway configuration.
+
+    Supports UPI Autopay and e-NACH mandate collection
+    for recurring payments.  All keys are loaded from
+    environment variables or secrets backend in production.
+    """
+
+    key_id: str = ""
+    key_secret: str = ""
+    webhook_secret: str = ""
+    api_base_url: str = "https://api.razorpay.com/v1"
+    payment_link_enabled: bool = Field(default=True)
+    subscription_enabled: bool = Field(default=True)
+    upi_autopay_enabled: bool = Field(default=True)
+    enable_nach: bool = Field(default=True)
+    max_retry_count: int = Field(default=3, ge=0)
+    retry_delay_seconds: int = Field(default=5, ge=1)
+    payment_timeout_minutes: int = Field(default=30, ge=1)
+    capture_enabled: bool = Field(default=True)
+
+
+class UnderwritingConfig(ForbidExtra):
+    """Underwriting engine configuration — rules, thresholds, and policies."""
+
+    max_default_probability: float = Field(default=0.25, ge=0.0, le=1.0)
+    min_credit_score: int = Field(default=650, ge=300, le=900)
+    max_dti_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
+    max_ltv_ratio: float = Field(default=0.8, ge=0.0, le=1.0)
+    max_principal: float = Field(default=10_000_000, ge=0)
+    min_principal: float = Field(default=1_000, ge=0)
+    max_tenor_months: int = Field(default=360, ge=1)
+    policy_file: str = ""
+    enable_auto_decision: bool = True
+
+
+class CreditBureauConfig(ForbidExtra):
+    """Credit bureau and CKYC configuration.
+
+    Supports CIBIL, Experian, Equifax for credit reports and
+    the CKYC registry for identity verification.
+    """
+
+    cibil_enabled: bool = Field(default=True)
+    cibil_api_key: str = ""
+    cibil_api_base: str = "https://api.cibil.com/v1"
+    experian_enabled: bool = Field(default=False)
+    experian_api_key: str = ""
+    experian_api_base: str = "https://api.experian.in/v1"
+    equifax_enabled: bool = Field(default=False)
+    equifax_api_key: str = ""
+    equifax_api_base: str = "https://api.equifax.com/in/v1"
+    ckyc_enabled: bool = Field(default=True)
+    ckyc_api_key: str = ""
+    ckyc_api_base: str = "https://api.ckycindia.in/v1"
+    timeout_seconds: int = Field(default=30, ge=1)
 
 
 class GovernanceConfig(ForbidExtra):
@@ -258,6 +393,14 @@ class Configuration(ForbidExtra):
     fee: FeeConfig = Field(default_factory=FeeConfig)
     governance: GovernanceConfig = Field(default_factory=GovernanceConfig)
     audit: AuditConfig = Field(default_factory=AuditConfig)
+    kfs: KfsConfig = Field(default_factory=KfsConfig)
+    npa: NpaConfig = Field(default_factory=NpaConfig)
+    dpdpa: DpdpaConfig = Field(default_factory=DpdpaConfig)
+    razorpay: RazorpayConfig = Field(default_factory=RazorpayConfig)
+    credit_bureau: CreditBureauConfig = Field(
+        default_factory=CreditBureauConfig)
+    underwriting: UnderwritingConfig = Field(
+        default_factory=UnderwritingConfig)
 
     @classmethod
     def default(cls) -> Configuration:
@@ -349,6 +492,12 @@ class Configuration(ForbidExtra):
             "fee",
             "governance",
             "audit",
+            "kfs",
+            "npa",
+            "dpdpa",
+            "razorpay",
+            "credit_bureau",
+            "underwriting",
         }
         unknown = set(data.keys()) - known_keys
         if unknown:
@@ -364,7 +513,8 @@ class Configuration(ForbidExtra):
             from pydantic import ValidationError
 
             merged = cfg.model_copy(update={
-                k: v for k, v in data_map.items() if k in model_cls.model_fields
+                k: v
+                for k, v in data_map.items() if k in model_cls.model_fields
             })
             try:
                 return model_cls(**merged.model_dump())
@@ -383,8 +533,8 @@ class Configuration(ForbidExtra):
             overrides = dict(data["logging"])
             if "format" in overrides and "log_format" not in overrides:
                 overrides["log_format"] = overrides.pop("format")
-            config.logging = merge_sub(LoggingConfig, "logging", config.logging,
-                                       overrides)
+            config.logging = merge_sub(LoggingConfig, "logging",
+                                       config.logging, overrides)
         if "identity" in data:
             config.identity = merge_sub(IdentityConfig, "identity",
                                         config.identity, data["identity"])
@@ -392,20 +542,20 @@ class Configuration(ForbidExtra):
             config.authz = merge_sub(AuthzConfig, "authz", config.authz,
                                      data["authz"])
         if "metrics" in data:
-            config.metrics = merge_sub(MetricsConfig, "metrics", config.metrics,
-                                       data["metrics"])
+            config.metrics = merge_sub(MetricsConfig, "metrics",
+                                       config.metrics, data["metrics"])
         if "migration" in data:
             config.migration = merge_sub(MigrationConfig, "migration",
                                          config.migration, data["migration"])
         if "tracing" in data:
-            config.tracing = merge_sub(TracingConfig, "tracing", config.tracing,
-                                       data["tracing"])
+            config.tracing = merge_sub(TracingConfig, "tracing",
+                                       config.tracing, data["tracing"])
         if "saga" in data:
             config.saga = merge_sub(SagaConfig, "saga", config.saga,
                                     data["saga"])
         if "secrets" in data:
-            config.secrets = merge_sub(SecretsConfig, "secrets", config.secrets,
-                                       data["secrets"])
+            config.secrets = merge_sub(SecretsConfig, "secrets",
+                                       config.secrets, data["secrets"])
         if "recovery" in data:
             config.recovery = merge_sub(RecoveryConfig, "recovery",
                                         config.recovery, data["recovery"])
@@ -426,8 +576,7 @@ class Configuration(ForbidExtra):
                 config.governance.param_defaults.update(defaults)
         if "audit" in data:
             config.audit = config.audit.model_copy(update=dict(
-                (k, data["audit"][k])
-                for k in data["audit"]
+                (k, data["audit"][k]) for k in data["audit"]
                 if k in AuditConfig.model_fields))
         if "data_dir" in data:
             config.data_dir = data["data_dir"]
@@ -460,7 +609,7 @@ class Configuration(ForbidExtra):
             "UNDERWRITE_AUTHZ_POLICY_FILE": ("authz", "policy_file", str),
             "UNDERWRITE_METRICS_ENABLED": ("metrics", "enabled", bool),
             "UNDERWRITE_METRICS_EXPORT_INTERVAL":
-                ("metrics", "export_interval", int),
+            ("metrics", "export_interval", int),
             "UNDERWRITE_TRACING_ENABLED": ("tracing", "enabled", bool),
             "UNDERWRITE_TRACING_EXPORTER": ("tracing", "exporter", str),
             "UNDERWRITE_SAGA_ENABLED": ("saga", "enabled", bool),
@@ -471,11 +620,11 @@ class Configuration(ForbidExtra):
             "UNDERWRITE_SECRETS_VAULT_TOKEN": ("secrets", "token", str),
             "UNDERWRITE_SECRETS_AWS_REGION": ("secrets", "region", str),
             "UNDERWRITE_RECOVERY_AUTO_RESTART":
-                ("recovery", "auto_restart", bool),
+            ("recovery", "auto_restart", bool),
             "UNDERWRITE_RECOVERY_MAX_RESTARTS":
-                ("recovery", "max_restarts", int),
+            ("recovery", "max_restarts", int),
             "UNDERWRITE_RECOVERY_BACKOFF":
-                ("recovery", "backoff_seconds", float),
+            ("recovery", "backoff_seconds", float),
             "UNDERWRITE_AUDIT_MAX_LEDGER": ("audit", "max_ledger", int),
             "UNDERWRITE_AUDIT_EXPORT_URL": ("audit", "export_url", str),
         }
@@ -529,4 +678,10 @@ SERVICE_NAMES: list[str] = [
     "decision",
     "fee",
     "statement",
+    "prepayment",
+    "kfs",
+    "razorpay",
+    "credit_bureau",
+    "consent",
+    "dsr",
 ]

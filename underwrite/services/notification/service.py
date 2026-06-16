@@ -43,7 +43,9 @@ class NotificationService(NanoService):
             return
 
         if self.__executor is None:
-            logger.warning("notification executor not available, dispatching synchronously")
+            logger.warning(
+                "notification executor not available, dispatching synchronously"
+            )
             self.__dispatch_notification(event)
             return
         self.__executor.submit(self.__dispatch_notification, event)

@@ -23,6 +23,7 @@ class TestStatementService:
         keys = store.keys("statement:stmt_L1_2025-01-01")
         assert len(keys) == 1
         rec = store.get(keys[0])
+        assert rec is not None
         assert rec["outstanding"] == 50000
         assert rec["loan_id"] == "L1"
 
@@ -96,6 +97,7 @@ class TestStatementService:
                   }))
         key = store.keys("statement:stmt_L5_2025-04-01")[0]
         rec = store.get(key)
+        assert rec is not None
         assert rec["total_paid"] == 1500
         assert rec["transaction_count"] == 2
 
@@ -135,4 +137,5 @@ class TestStatementService:
                   }))
         key = store.keys("statement:stmt_L8_2025-05-01")[0]
         rec = store.get(key)
+        assert rec is not None
         assert "period_end" in rec

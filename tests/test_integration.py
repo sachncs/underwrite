@@ -6,6 +6,8 @@ Runtime and events flow through the full pipeline.
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from underwrite.__config__ import Configuration
 from underwrite.__events__ import Event, EventType
 from underwrite.__runtime__ import Runtime
@@ -31,9 +33,13 @@ class TestRuntimeIntegration:
         rt.register("mechanism")
         rt.wire("mechanism")
         rt.start(["mechanism"])
-        assert rt.get("mechanism").is_running
+        svc = rt.get("mechanism")
+        assert svc is not None
+        assert svc.is_running
         rt.stop()
-        assert rt.get("mechanism").is_running is False
+        svc = rt.get("mechanism")
+        assert svc is not None
+        assert svc.is_running is False
 
     def test_mechanism_emits_seed_added(self) -> None:
         rt = memory_runtime()
@@ -45,6 +51,7 @@ class TestRuntimeIntegration:
         bus.start()
         rt.start(["mechanism"])
         svc = rt.get("mechanism")
+        assert svc is not None
         svc.handle(
             Event(event_type="mechanism",
                   source="test",
@@ -63,6 +70,7 @@ class TestRuntimeIntegration:
         rt.wire("mechanism")
         rt.start(["mechanism"])
         svc = rt.get("mechanism")
+        assert svc is not None
         svc.handle(
             Event(event_type="mechanism",
                   source="test",
@@ -92,7 +100,8 @@ class TestRuntimeIntegration:
                       "borrower": "alice",
                       "principal": 10000
                   }))
-        audit = rt.get("audit")
+        audit = cast(Any, rt.get("audit"))
+        assert audit is not None
         assert len(audit.ledger) >= 1
         assert audit.ledger[0]["event_type"] == EventType.LOAN_ORIGINATED
 
@@ -108,6 +117,7 @@ class TestRuntimeIntegration:
         bus.start()
         rt.start(["mechanism"])
         svc = rt.get("mechanism")
+        assert svc is not None
         svc.handle(
             Event(event_type="mechanism",
                   source="test",
@@ -131,6 +141,7 @@ class TestRuntimeIntegration:
         bus.start()
         rt.start(["mechanism", "audit"])
         svc = rt.get("mechanism")
+        assert svc is not None
 
         svc.handle(
             Event(event_type="mechanism",
@@ -168,7 +179,8 @@ class TestRuntimeIntegration:
         assert EventType.LOAN_ORIGINATED in emitted
 
         audit = rt.get("audit")
-        assert len(audit.ledger) >= 3
+        assert audit is not None
+        assert len(audit.ledger) >= 3  # type: ignore[attr-defined]
         rt.stop()
 
 
@@ -202,6 +214,7 @@ class TestCrossServiceCommunication:
         rt.wire("audit")
         rt.start(["mechanism", "audit"])
         svc = rt.get("mechanism")
+        assert svc is not None
         svc.handle(
             Event(event_type="mechanism",
                   source="test",

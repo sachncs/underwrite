@@ -73,8 +73,7 @@ class Event:
         if extra:
             logger.warning("Event.from_dict dropping unknown field(s): %s",
                            sorted(extra))
-        return cls(
-            **{k: data[k] for k in known if k in data})
+        return cls(**{k: data[k] for k in known if k in data})
 
 
 class EventType(str, enum.Enum):
@@ -116,6 +115,9 @@ class EventType(str, enum.Enum):
     # NPA
     NPA_BUCKET_CHANGED = "npa.bucket.changed"
     DLG_TRIGGERED = "npa.dlg.triggered"
+    SMA_CLASSIFIED = "sma.classified"
+    PROVISIONING_COMPUTED = "provisioning.computed"
+    INCOME_RECOGNITION_SUSPENDED = "income_recognition.suspended"
 
     # Collateral
     COLLATERAL_MARKED = "collateral.marked"
@@ -145,6 +147,10 @@ class EventType(str, enum.Enum):
     UNDERWRITER_APPROVED = "underwriter.approved"
     UNDERWRITER_REJECTED = "underwriter.rejected"
     UNDERWRITE_REQUEST = "underwrite.request"
+    UNDERWRITER_CONDITIONAL_APPROVED = "underwriter.conditional_approved"
+    UNDERWRITER_REVIEW = "underwriter.review"
+    UNDERWRITER_ESCALATED = "underwriter.escalated"
+    UNDERWRITE_RULE_VIOLATED = "underwrite.rule.violated"
 
     # Document
     DOCUMENT_GENERATED = "document.generated"
@@ -179,6 +185,46 @@ class EventType(str, enum.Enum):
     FEE_ASSESSED = "fee.assessed"
     FEE_ASSESS = "fee.assess"
     FEE_PAY = "fee.pay"
+    PENAL_INTEREST_ASSESSED = "penal_interest.assessed"
+
+    # Prepayment / Foreclosure
+    PREPAYMENT_REQUEST = "prepayment.request"
+    PREPAYMENT_PROCESSED = "prepayment.processed"
+    FORECLOSURE_COMPUTED = "foreclosure.computed"
+
+    # KFS (Key Fact Statement)
+    KFS_GENERATE = "kfs.generate"
+    KFS_GENERATED = "kfs.generated"
+
+    # Razorpay payment gateway
+    RAZORPAY_ORDER_CREATE = "razorpay.order.create"
+    RAZORPAY_ORDER_CREATED = "razorpay.order.created"
+    RAZORPAY_SUBSCRIBE = "razorpay.subscribe"
+    RAZORPAY_SUBSCRIPTION_CREATED = "razorpay.subscription.created"
+    RAZORPAY_PAYMENT_CAPTURED = "razorpay.payment.captured"
+    RAZORPAY_PAYMENT_FAILED = "razorpay.payment.failed"
+    RAZORPAY_PAYMENT_REFUNDED = "razorpay.payment.refunded"
+    RAZORPAY_SUBSCRIPTION_CHARGED = "razorpay.subscription.charged"
+    RAZORPAY_SUBSCRIPTION_FAILED = "razorpay.subscription.failed"
+    RAZORPAY_MANDATE_ACTIVE = "razorpay.mandate.active"
+    RAZORPAY_MANDATE_INACTIVE = "razorpay.mandate.inactive"
+    RAZORPAY_WEBHOOK_RECEIVED = "razorpay.webhook.received"
+
+    # DPDPA — Data Protection
+    CONSENT_RECORDED = "consent.recorded"
+    CONSENT_WITHDRAWN = "consent.withdrawn"
+    CONSENT_EXPIRED = "consent.expired"
+    DSR_REQUEST = "dsr.request"
+    DSR_REQUESTED = "dsr.requested"
+    DSR_FULFILLED = "dsr.fulfilled"
+    DSR_REJECTED = "dsr.rejected"
+    GRIEVANCE_LOGGED = "grievance.logged"
+    GRIEVANCE_RESOLVED = "grievance.resolved"
+    BREACH_DETECTED = "breach.detected"
+    BREACH_NOTIFIED = "breach.notified"
+    BREACH_CLOSED = "breach.closed"
+    DATA_PURGED = "data.purged"
+    DATA_ARCHIVED = "data.archived"
 
     # Statement
     STATEMENT_GENERATED = "statement.generated"
@@ -214,6 +260,16 @@ class EventType(str, enum.Enum):
     SAGA_COMPLETED = "saga.completed"
     SAGA_ROLLED_BACK = "saga.rolled_back"
     SAGA_COMPENSATE = "saga.compensate"
+
+    # Credit Bureau
+    CREDIT_BUREAU_CHECK = "credit_bureau.check"
+    CREDIT_BUREAU_CHECKED = "credit_bureau.checked"
+    CREDIT_BUREAU_CHECK_FAILED = "credit_bureau.check_failed"
+
+    # CKYC
+    CKYC_VERIFY = "ckyc.verify"
+    CKYC_VERIFIED = "ckyc.verified"
+    CKYC_REJECTED = "ckyc.rejected"
 
     # Idempotency
     DUPLICATE_DROPPED = "idempotency.duplicate_dropped"

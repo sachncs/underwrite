@@ -106,10 +106,88 @@ All 80+ event types are defined as an `EventType` enum in `underwrite/__events__
 ### KYC / AML
 | Event | Trigger |
 |---|---|
-| `kyc.verified` | PAN + Aadhaar format valid |
+| `kyc.verified` | PAN + Aadhaar valid |
 | `kyc.rejected` | Invalid PAN or Aadhaar |
-| `aml.cleared` | Watchlist check passed |
-| `aml.frozen` | Watchlist hit |
+| `kyc.video_initiated` | Video KYC session started |
+| `kyc.video_verified` | Video KYC completed successfully |
+| `aml.cleared` | Low-risk: AML score below threshold |
+| `aml.flagged` | Medium-risk: AML score warrants review |
+| `aml.frozen` | High-risk: AML score above freeze threshold |
+
+### CKYC / Credit Bureau
+| Event | Trigger |
+|---|---|
+| `ckyc.verify` | Initiate CKYC registry lookup |
+| `ckyc.verified` | CKYC identity matched |
+| `ckyc.rejected` | CKYC identity mismatch |
+| `credit_bureau.check` | Credit report requested |
+| `credit_bureau.checked` | Credit report received with score |
+| `credit_bureau.check_failed` | Bureau API error |
+
+### Consent (DPDPA)
+| Event | Trigger |
+|---|---|
+| `consent.recorded` | Consent granted for a purpose |
+| `consent.withdrawn` | Consent withdrawn by data subject |
+| `consent.expired` | Consent period ended |
+
+### DSR (Data Subject Rights)
+| Event | Trigger |
+|---|---|
+| `dsr.request` | DSR submitted by data subject |
+| `dsr.requested` | DSR forwarded for fulfillment |
+| `dsr.fulfilled` | DSR completed within 30-day window |
+| `dsr.rejected` | DSR denied with rationale |
+
+### KFS (Key Fact Statement)
+| Event | Trigger |
+|---|---|
+| `kfs.generate` | KFS generation requested |
+| `kfs.generated` | KFS document produced with full disclosure |
+
+### Pricing (RBI Compliant)
+| Event | Trigger |
+|---|---|
+| `pricing.request` | Rate/fee computation requested |
+| `pricing.computed` | Price set with APR, EMI, fees |
+| `penal_interest.assessed` | Penal interest applied on overdue |
+| `foreclosure.computed` | Foreclosure charges calculated |
+
+### Prepayment / Provisioning / SMA
+| Event | Trigger |
+|---|---|
+| `prepayment.request` | Prepayment initiated by borrower |
+| `prepayment.processed` | Prepayment completed with charges |
+| `provisioning.computed` | NPA provisioning amount calculated |
+| `sma.classified` | SMA-0/1/2 classification assigned |
+| `income_recognition.suspended` | Income recognition suspended for NPA |
+
+### Data Protection / Breach
+| Event | Trigger |
+|---|---|
+| `breach.detected` | Potential data breach identified |
+| `breach.notified` | Breach notification sent to DPB/authority |
+| `breach.closed` | Breach investigation closed |
+| `grievance.logged` | Complaint/grievance received |
+| `grievance.resolved` | Grievance resolved |
+| `data.purged` | Expired data purged per retention policy |
+| `data.archived` | Historical data archived |
+
+### Razorpay (PG)
+| Event | Trigger |
+|---|---|
+| `razorpay.order.create` | Payment order creation to Razorpay |
+| `razorpay.order.created` | Razorpay order confirmed |
+| `razorpay.payment.captured` | Payment successfully captured |
+| `razorpay.payment.failed` | Payment failed |
+| `razorpay.payment.refunded` | Payment refunded |
+| `razorpay.subscribe` | Mandate/e-NACH subscription created |
+| `razorpay.subscription.created` | Subscription active |
+| `razorpay.subscription.charged` | Recurring charge collected |
+| `razorpay.subscription.failed` | Recurring charge failed |
+| `razorpay.mandate.active` | e-NACH mandate activated |
+| `razorpay.mandate.inactive` | e-NACH mandate deactivated |
+| `razorpay.webhook.received` | Razorpay webhook event received |
 
 ### Fraud
 | Event | Trigger |
@@ -244,7 +322,20 @@ Commands arrive as service-name events — i.e. events with `event_type == "mech
 - **Large origination**: Principal > 1,000,000 → `fraud.alert` with rule `"large_origination"`
 
 ### ComplianceService
-`underwrite/services/compliance/service.py` — Validates PAN (`^[A-Z]{5}[0-9]{4}[A-Z]$`) and Aadhaar (`^\d{12}$`) formats. Rejects on first failure. On success, emits both `kyc.verified` and `aml.cleared`.
+`underwrite/services/compliance/service.py` — Indian KYC/AML compliance. Validates PAN format with category detection (Individual/Company/Firm/Trust/HUF etc.) and Aadhaar Verhoeff check-digit verification (not just regex). AML screening uses weighted keyword matching for PEPs, sanctions, fraud flags, and terror financing. Returns one of three states:
+- **cleared** — low risk (score < threshold)
+- **flagged** — medium risk, needs manual review
+- **frozen** — high risk, blocked
+
+Emits:
+- `kyc.verified` on PAN + Aadhaar format pass
+- `kyc.rejected` on validation failure
+- `aml.cleared` / `aml.flagged` / `aml.frozen` based on risk score
+- `ckyc.verify` to initiate CKYC registry lookup
+- `kyc.video_initiated` when video KYC is triggered
+- `kyc.video_verified` on video KYC completion
+
+Also performs consent pre-check before initiating KYC, emitting `consent.expired` if consent is needed.
 
 ### DecisionService
 `underwrite/services/decision/service.py` — Signal aggregation. Collects signals from fraud, risk, and compliance for a given entity. On `decision.evaluate`:
@@ -282,20 +373,47 @@ DLG (Default Loss Guarantee) triggers at 120+ days overdue, emitting `npa.dlg.tr
 `underwrite/services/collateral/service.py` — LTV tracking. On origination, marks collateral at `ltv_ratio = 0.75` (75%). On default, liquidates and emits `collateral.liquidated`.
 
 ### PaymentService
-`underwrite/services/payment/service.py` — Payment scheduling, receipt, and overdue detection. Uses `payment.schedule`, `payment.receive`, `payment.check_overdue` commands. Overdue detection uses a 30-day cutoff.
+`underwrite/services/payment/service.py` — Payment scheduling, receipt, and overdue detection. Uses `payment.schedule`, `payment.receive`, `payment.check_overdue` commands. Overdue detection uses a 30-day cutoff. Integrates with Razorpay for UPI Autopay and e-NACH mandate collection.
+
+### PricingService
+`underwrite/services/pricing/service.py` — RBI-compliant interest rate and fee computation. Enforces per-product rate caps (home: 12%, gold: 18%, personal: 28%, micro-loans under ₹50K: 30% p.a. all-in-cost). Computes:
+- **EMI** (equated monthly installment with amortization schedule)
+- **APR** (annual percentage rate reflecting all-in-cost per RBI Master Direction)
+- **Penal interest** (capped at 24% p.a.)
+- **Foreclosure charges** (0% for personal/home loans per RBI)
+- **GST on fees** (18% IGST on all processing and service fees)
+- **Debt-to-income ratio** and **credit score thresholds**
+
+### KfsService
+`underwrite/services/kfs/service.py` — Key Fact Statement generation per RBI Master Direction on Digital Lending. The KFS is a standardized disclosure document that includes: loan amount, APR, repayment schedule, fees, penal interest, cooling-off period, and grievance redressal contact. The cooling-off period of 3 days allows borrowers to exit without penalty.
+
+### ConsentService
+`underwrite/services/consent/service.py` — DPDPA 2023 consent lifecycle management. Tracks consent for each data processing purpose (KYC verification, credit bureau reporting, loan servicing, collection, communication). Supports consent recording, withdrawal, expiry, and re-consent workflows. Each consent record includes: purpose, grant timestamp, expiry timestamp, and withdrawal timestamp.
+
+### CreditBureauService
+`underwrite/services/credit_bureau/service.py` — Multi-bureau credit report integration (CIBIL, Experian, Equifax) and CKYC identity verification. On a credit check request:
+1. Queries CIBIL (primary bureau) for credit score and report
+2. Optionally queries Experian and Equifax for supplementary data
+3. Performs CKYC check to verify identity against central KYC registry
+4. Emits `credit_bureau.checked` with score, report summary, and CKYC status
+
+### DataSubjectRightsService
+`underwrite/services/dsr/service.py` — DPDPA 2023 data subject rights fulfillment. Handles DSR requests (access, correction, erasure, portability, grievance). On receipt of `dsr.request`:
+- Validates the requestor's identity
+- Fulfills within the DPDPA-mandated 30-day window
+- Emits `dsr.fulfilled` or `dsr.rejected` with rationale
 
 ### Other Services
 
 | Service | File | Responsibility |
 |---|---|---|
 | **QuoteService** | `quote/service.py` | Quote generation from pricing |
-| **PricingService** | `pricing/service.py` | Interest rate computation |
 | **OriginationService** | `origination/service.py` | Application lifecycle |
 | **ServicingService** | `servicing/service.py` | Loan servicing |
 | **CollectionService** | `collection/service.py` | Collections tracking |
 | **DisbursementService** | `disbursement/service.py` | Fund disbursement |
 | **SettlementService** | `settlement/service.py` | Settlement processing |
-| **RecoveryService** | `recovery/service.py` | Default recovery actions |
+| **RecoveryService** | `recovery/service.py` | Default recovery actions (store-backed) |
 | **GovernanceService** | `governance/service.py` | Protocol parameter governance |
 | **GraphService** | `graph/service.py` | Delegation graph queries |
 | **IdentityService** | `identity/service.py` | Key registration/rotation |

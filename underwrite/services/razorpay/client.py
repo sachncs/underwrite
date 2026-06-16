@@ -1,0 +1,577 @@
+"""Razorpay HTTP client abstraction with mock support."""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any
+from urllib.parse import urljoin
+
+
+try:
+    import httpx
+    HAS_HTTPX = True
+except ImportError:  # pragma: no cover
+    HAS_HTTPX = False
+
+
+class RazorpayError(Exception):
+    """Raised when the Razorpay API returns an error."""
+
+
+class RazorpayAuthError(RazorpayError):
+    """Raised on authentication/authorization failures."""
+
+
+class RazorpayValidationError(RazorpayError):
+    """Raised on request validation errors."""
+
+
+class RazorpayNotFoundError(RazorpayError):
+    """Raised when a resource is not found."""
+
+
+@dataclass
+class RazorpayOrder:
+    """Razorpay order object."""
+
+    id: str
+    amount: int
+    currency: str
+    receipt: str
+    status: str
+    created_at: int
+    attempts: int = 0
+    notes: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class RazorpayPayment:
+    """Razorpay payment object."""
+
+    id: str
+    order_id: str
+    amount: int
+    currency: str
+    status: str
+    method: str
+    email: str
+    contact: str
+    created_at: int
+    captured: bool = False
+    error_code: str = ""
+    error_description: str = ""
+    notes: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class RazorpaySubscription:
+    """Razorpay subscription object (UPI Autopay / e-NACH)."""
+
+    id: str
+    plan_id: str
+    status: str
+    total_count: int
+    paid_count: int
+    remaining_count: int
+    start_at: int
+    end_at: int
+    created_at: int
+    notes: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class RazorpayPaymentLink:
+    """Razorpay payment link object."""
+
+    id: str
+    short_url: str
+    amount: int
+    currency: str
+    status: str
+    created_at: int
+    notes: dict[str, str] = field(default_factory=dict)
+
+
+# -- Client Interface ---------------------------------------------------------
+
+
+class RazorpayClient:
+    """Abstract Razorpay API client.
+
+    Implementations provide create_order, capture_payment, create_subscription,
+    create_payment_link, refund_payment, and verify_webhook.
+    """
+
+    def create_order(
+        self,
+        amount: int,
+        currency: str = "INR",
+        receipt: str = "",
+        notes: dict[str, str] | None = None,
+    ) -> RazorpayOrder:
+        """Create a Razorpay order.
+
+        Args:
+            amount: Amount in paise (smallest currency unit).
+            currency: Three-letter ISO currency code.
+            receipt: Unique receipt identifier.
+            notes: Optional key-value notes.
+
+        Returns:
+            The created RazorpayOrder.
+        """
+        raise NotImplementedError
+
+    def capture_payment(self, payment_id: str,
+                        amount: int) -> RazorpayPayment:
+        """Capture an authorized payment.
+
+        Args:
+            payment_id: Razorpay payment ID.
+            amount: Amount to capture in paise.
+
+        Returns:
+            The captured RazorpayPayment.
+        """
+        raise NotImplementedError
+
+    def fetch_payment(self, payment_id: str) -> RazorpayPayment:
+        """Fetch payment details by ID.
+
+        Args:
+            payment_id: Razorpay payment ID.
+
+        Returns:
+            The RazorpayPayment.
+        """
+        raise NotImplementedError
+
+    def create_subscription(
+        self,
+        plan_id: str,
+        total_count: int,
+        customer_notify: bool = True,
+        notes: dict[str, str] | None = None,
+        start_at: int | None = None,
+        expire_by: int | None = None,
+    ) -> RazorpaySubscription:
+        """Create a recurring subscription (UPI Autopay / e-NACH).
+
+        Args:
+            plan_id: Razorpay plan ID.
+            total_count: Total number of recurring charges.
+            customer_notify: Whether to notify the customer.
+            notes: Optional key-value notes.
+            start_at: Optional start timestamp.
+            expire_by: Optional expiry timestamp.
+
+        Returns:
+            The created RazorpaySubscription.
+        """
+        raise NotImplementedError
+
+    def create_payment_link(
+        self,
+        amount: int,
+        currency: str = "INR",
+        description: str = "",
+        customer: dict[str, Any] | None = None,
+        notes: dict[str, str] | None = None,
+    ) -> RazorpayPaymentLink:
+        """Create a payment link.
+
+        Args:
+            amount: Amount in paise.
+            currency: Three-letter ISO currency code.
+            description: Payment description.
+            customer: Customer details dict.
+            notes: Optional key-value notes.
+
+        Returns:
+            The created RazorpayPaymentLink.
+        """
+        raise NotImplementedError
+
+    def refund_payment(
+        self,
+        payment_id: str,
+        amount: int | None = None,
+        notes: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Refund a payment (full or partial).
+
+        Args:
+            payment_id: Razorpay payment ID.
+            amount: Amount to refund in paise (None = full).
+            notes: Optional key-value notes.
+
+        Returns:
+            Raw refund response dict.
+        """
+        raise NotImplementedError
+
+    def verify_webhook(self, payload: bytes, signature: str,
+                       secret: str) -> bool:
+        """Verify a Razorpay webhook signature.
+
+        Args:
+            payload: Raw request body bytes.
+            signature: Value of the ``X-Razorpay-Signature`` header.
+            secret: Webhook secret.
+
+        Returns:
+            True if the signature is valid.
+        """
+        raise NotImplementedError
+
+
+# -- HTTP Implementation ------------------------------------------------------
+
+
+class HttpRazorpayClient(RazorpayClient):
+    """Production Razorpay client using httpx.
+
+    Handles authentication, request/response serialisation, and error
+    mapping.  Uses Basic Auth with the key_id and key_secret.
+    """
+
+    def __init__(
+        self,
+        key_id: str,
+        key_secret: str,
+        webhook_secret: str = "",
+        api_base_url: str = "https://api.razorpay.com/v1",
+        timeout_seconds: int = 30,
+    ) -> None:
+        self.__key_id = key_id
+        self.__key_secret = key_secret
+        self.__webhook_secret = webhook_secret
+        self.__base_url = api_base_url.rstrip("/")
+        self.__timeout = timeout_seconds
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        url = urljoin(self.__base_url + "/", path.lstrip("/"))
+        auth = (self.__key_id, self.__key_secret)
+        try:
+            if not HAS_HTTPX:
+                raise RuntimeError("httpx is required for HttpRazorpayClient")
+            with httpx.Client(auth=auth,
+                              timeout=self.__timeout) as client:
+                resp = client.request(method, url, json=data)
+        except httpx.TimeoutException as exc:
+            raise RazorpayError(f"request timed out: {exc}") from exc
+        except httpx.RequestError as exc:
+            raise RazorpayError(f"request failed: {exc}") from exc
+        return self._handle_response(resp)
+
+    def _handle_response(
+        self, resp: httpx.Response) -> dict[str, Any]:
+        try:
+            body = resp.json()
+        except (json.JSONDecodeError, httpx.DecodingError) as exc:
+            raise RazorpayError(
+                f"invalid JSON response ({resp.status_code}): {exc}") from exc
+        if resp.status_code == 401:
+            raise RazorpayAuthError(body.get("error",
+                                            {}).get("description",
+                                                    "unauthorized"))
+        if resp.status_code == 404:
+            raise RazorpayNotFoundError(body.get("error", {}).get(
+                "description", "not found"))
+        if resp.status_code == 400:
+            raise RazorpayValidationError(body.get("error", {}).get(
+                "description", "validation error"))
+        if not resp.is_success:
+            raise RazorpayError(
+                f"API error ({resp.status_code}): "
+                f"{body.get('error', {}).get('description', 'unknown')}")
+        return body
+
+    def create_order(
+        self,
+        amount: int,
+        currency: str = "INR",
+        receipt: str = "",
+        notes: dict[str, str] | None = None,
+    ) -> RazorpayOrder:
+        body = self._request("POST", "/orders", {
+            "amount": amount,
+            "currency": currency,
+            "receipt": receipt,
+            "notes": notes or {},
+        })
+        return RazorpayOrder(
+            id=body["id"],
+            amount=body["amount"],
+            currency=body["currency"],
+            receipt=body.get("receipt", ""),
+            status=body["status"],
+            created_at=body.get("created_at", 0),
+            attempts=body.get("attempts", 0),
+            notes=body.get("notes", {}),
+        )
+
+    def capture_payment(self, payment_id: str,
+                        amount: int) -> RazorpayPayment:
+        body = self._request("POST", f"/payments/{payment_id}/capture",
+                             {"amount": amount})
+        return self._parse_payment(body)
+
+    def fetch_payment(self, payment_id: str) -> RazorpayPayment:
+        body = self._request("GET", f"/payments/{payment_id}")
+        return self._parse_payment(body)
+
+    def create_subscription(
+        self,
+        plan_id: str,
+        total_count: int,
+        customer_notify: bool = True,
+        notes: dict[str, str] | None = None,
+        start_at: int | None = None,
+        expire_by: int | None = None,
+    ) -> RazorpaySubscription:
+        data: dict[str, Any] = {
+            "plan_id": plan_id,
+            "total_count": total_count,
+            "customer_notify": customer_notify,
+            "notes": notes or {},
+        }
+        if start_at is not None:
+            data["start_at"] = start_at
+        if expire_by is not None:
+            data["expire_by"] = expire_by
+        body = self._request("POST", "/subscriptions", data)
+        return RazorpaySubscription(
+            id=body["id"],
+            plan_id=body.get("plan_id", ""),
+            status=body["status"],
+            total_count=body.get("total_count", 0),
+            paid_count=body.get("paid_count", 0),
+            remaining_count=body.get("remaining_count", 0),
+            start_at=body.get("start_at", 0),
+            end_at=body.get("end_at", 0),
+            created_at=body.get("created_at", 0),
+            notes=body.get("notes", {}),
+        )
+
+    def create_payment_link(
+        self,
+        amount: int,
+        currency: str = "INR",
+        description: str = "",
+        customer: dict[str, Any] | None = None,
+        notes: dict[str, str] | None = None,
+    ) -> RazorpayPaymentLink:
+        data: dict[str, Any] = {
+            "amount": amount,
+            "currency": currency,
+            "description": description,
+            "notes": notes or {},
+        }
+        if customer:
+            data["customer"] = customer
+        body = self._request("POST", "/payment_links", data)
+        return RazorpayPaymentLink(
+            id=body["id"],
+            short_url=body.get("short_url", ""),
+            amount=body["amount"],
+            currency=body["currency"],
+            status=body["status"],
+            created_at=body.get("created_at", 0),
+            notes=body.get("notes", {}),
+        )
+
+    def refund_payment(
+        self,
+        payment_id: str,
+        amount: int | None = None,
+        notes: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        data: dict[str, Any] = {}
+        if amount is not None:
+            data["amount"] = amount
+        if notes:
+            data["notes"] = notes
+        return self._request("POST", f"/payments/{payment_id}/refund", data)
+
+    def verify_webhook(self, payload: bytes, signature: str,
+                       secret: str) -> bool:
+        expected = hmac.new(
+            secret.encode("utf-8"),
+            payload,
+            hashlib.sha256,
+        ).hexdigest()
+        return hmac.compare_digest(expected, signature)
+
+    def _parse_payment(self, body: dict[str, Any]) -> RazorpayPayment:
+        return RazorpayPayment(
+            id=body["id"],
+            order_id=body.get("order_id", ""),
+            amount=body["amount"],
+            currency=body.get("currency", "INR"),
+            status=body["status"],
+            method=body.get("method", ""),
+            email=body.get("email", ""),
+            contact=body.get("contact", ""),
+            created_at=body.get("created_at", 0),
+            captured=body.get("captured", False),
+            error_code=body.get("error_code", ""),
+            error_description=body.get("error_description", ""),
+            notes=body.get("notes", {}),
+        )
+
+
+# -- Mock Implementation ------------------------------------------------------
+
+
+class MockRazorpayClient(RazorpayClient):
+    """In-memory mock Razorpay client for testing.
+
+    Stores orders, payments, subscriptions, and payment links in-memory.
+    Supports configurable failure modes via ``fail_on``.
+    """
+
+    def __init__(self) -> None:
+        self.orders: dict[str, RazorpayOrder] = {}
+        self.payments: dict[str, RazorpayPayment] = {}
+        self.subscriptions: dict[str, RazorpaySubscription] = {}
+        self.payment_links: dict[str, RazorpayPaymentLink] = {}
+        self.refunds: list[dict[str, Any]] = []
+        self.fail_on: dict[str, Exception] = {}
+        self._counter: int = 0
+
+    def _next_id(self, prefix: str) -> str:
+        self._counter += 1
+        return f"{prefix}_{self._counter}"
+
+    def _check_fail(self, action: str) -> None:
+        exc = self.fail_on.get(action)
+        if exc is not None:
+            raise exc
+
+    def _now(self) -> int:
+        return int(datetime.now(timezone.utc).timestamp())
+
+    def create_order(
+        self,
+        amount: int,
+        currency: str = "INR",
+        receipt: str = "",
+        notes: dict[str, str] | None = None,
+    ) -> RazorpayOrder:
+        self._check_fail("create_order")
+        order = RazorpayOrder(
+            id=self._next_id("order"),
+            amount=amount,
+            currency=currency,
+            receipt=receipt,
+            status="created",
+            created_at=self._now(),
+            notes=notes or {},
+        )
+        self.orders[order.id] = order
+        return order
+
+    def capture_payment(self, payment_id: str,
+                        amount: int) -> RazorpayPayment:
+        self._check_fail("capture_payment")
+        payment = self.payments.get(payment_id)
+        if payment is None:
+            raise RazorpayNotFoundError(f"payment {payment_id} not found")
+        payment.captured = True
+        payment.status = "captured"
+        return payment
+
+    def fetch_payment(self, payment_id: str) -> RazorpayPayment:
+        self._check_fail("fetch_payment")
+        payment = self.payments.get(payment_id)
+        if payment is None:
+            raise RazorpayNotFoundError(f"payment {payment_id} not found")
+        return payment
+
+    def create_subscription(
+        self,
+        plan_id: str,
+        total_count: int,
+        customer_notify: bool = True,
+        notes: dict[str, str] | None = None,
+        start_at: int | None = None,
+        expire_by: int | None = None,
+    ) -> RazorpaySubscription:
+        self._check_fail("create_subscription")
+        now = self._now()
+        sub = RazorpaySubscription(
+            id=self._next_id("sub"),
+            plan_id=plan_id,
+            status="created",
+            total_count=total_count,
+            paid_count=0,
+            remaining_count=total_count,
+            start_at=start_at or now,
+            end_at=expire_by or (now + 365 * 86400),
+            created_at=now,
+            notes=notes or {},
+        )
+        self.subscriptions[sub.id] = sub
+        return sub
+
+    def create_payment_link(
+        self,
+        amount: int,
+        currency: str = "INR",
+        description: str = "",
+        customer: dict[str, Any] | None = None,
+        notes: dict[str, str] | None = None,
+    ) -> RazorpayPaymentLink:
+        self._check_fail("create_payment_link")
+        link = RazorpayPaymentLink(
+            id=self._next_id("link"),
+            short_url=f"https://rzp.io/i/{self._next_id('test')}",
+            amount=amount,
+            currency=currency,
+            status="created",
+            created_at=self._now(),
+            notes=notes or {},
+        )
+        self.payment_links[link.id] = link
+        return link
+
+    def refund_payment(
+        self,
+        payment_id: str,
+        amount: int | None = None,
+        notes: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        self._check_fail("refund_payment")
+        payment = self.payments.get(payment_id)
+        if payment is None:
+            raise RazorpayNotFoundError(f"payment {payment_id} not found")
+        refund = {
+            "id": self._next_id("rfnd"),
+            "payment_id": payment_id,
+            "amount": amount or payment.amount,
+            "status": "processed",
+            "created_at": self._now(),
+            "notes": notes or {},
+        }
+        self.refunds.append(refund)
+        payment.status = "refunded"
+        return refund
+
+    def verify_webhook(self, payload: bytes, signature: str,
+                       secret: str) -> bool:
+        expected = hmac.new(
+            secret.encode("utf-8"),
+            payload,
+            hashlib.sha256,
+        ).hexdigest()
+        return hmac.compare_digest(expected, signature)

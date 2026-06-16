@@ -18,6 +18,7 @@ class TestWorkflowService:
                       "entity_id": "app_1"
                   }))
         rec = svc.store.get("workflow:app_1")
+        assert rec is not None
         assert rec["type"] == "origination"
         assert rec["current_stage"] == "created"
         assert rec["status"] == "active"
@@ -74,6 +75,7 @@ class TestWorkflowService:
                   source="test",
                   payload={"entity_id": "app_2"}))
         rec = svc.store.get("workflow:app_2")
+        assert rec is not None
         assert rec["current_stage"] == "kyc_pending"
         assert rec["stage_index"] == 1
 
@@ -92,6 +94,7 @@ class TestWorkflowService:
                       source="test",
                       payload={"entity_id": "app_3"}))
         rec = svc.store.get("workflow:app_3")
+        assert rec is not None
         assert rec["status"] == "completed"
         assert "completed_at" in rec
 
@@ -144,6 +147,7 @@ class TestWorkflowService:
                   source="test",
                   payload={"application_id": "app_6"}))
         rec = svc.store.get("workflow:app_6")
+        assert rec is not None
         assert rec["current_stage"] == "kyc_pending"
 
     def test_ignores_unrelated_events(self) -> None:
@@ -167,5 +171,9 @@ class TestWorkflowService:
                       "type": "recovery",
                       "entity_id": "b"
                   }))
-        assert svc.store.get("workflow:a")["type"] == "origination"
-        assert svc.store.get("workflow:b")["type"] == "recovery"
+        rec_a = svc.store.get("workflow:a")
+        assert rec_a is not None
+        assert rec_a["type"] == "origination"
+        rec_b = svc.store.get("workflow:b")
+        assert rec_b is not None
+        assert rec_b["type"] == "recovery"

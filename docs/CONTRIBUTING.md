@@ -110,8 +110,8 @@ Allowed types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `ci`, `perf`,
 
 ## Security
 
-Vulnerabilities should be reported via the [security policy](https://github.com/sachn-cs/unsecured-lending-underwriting/security/policy) — not through public issues. For sensitive findings, email the maintainers directly.
+Vulnerabilities should be reported via the [security policy](https://github.com/sachn-cs/underwrite/security/policy) — not through public issues. For sensitive findings, email the maintainers directly.
 
 ## Questions
 
-Open a [discussion](https://github.com/sachn-cs/unsecured-lending-underwriting/discussions) or file an [issue](https://github.com/sachn-cs/unsecured-lending-underwriting/issues).
+Open a [discussion](https://github.com/sachn-cs/underwrite/discussions) or file an [issue](https://github.com/sachn-cs/underwrite/issues).

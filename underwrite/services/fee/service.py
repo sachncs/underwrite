@@ -1,8 +1,8 @@
 """Fee assessment service.
 
 Calculates and tracks fees: late payment fees, origination fees,
-prepayment penalties, and service charges.  Emits ``fee.assessed``
-when a fee is applied to a loan.
+prepayment penalties, service charges, and penal interest.
+Emits ``fee.assessed`` when a fee is applied to a loan.
 """
 
 from __future__ import annotations
@@ -28,20 +28,29 @@ MAX_FEE_PER_LOAN: float = 1000.0
 
 
 class FeeService(StatefulService):
-    """Manages fee assessment, tracking, and lifecycle."""
+    """Manages fee assessment, tracking, and lifecycle.
+
+    Supports Indian lending fee structures:
+      - Flat late payment fee (per overdue event)
+      - Percentage-based late fee (``late_payment_percent`` of overdue EMI)
+      - Daily penal interest on overdue principal (``penal_interest_daily_rate``)
+      - Origination fee (percentage of principal)
+      - Prepayment penalty (percentage of outstanding)
+    """
 
     def __init__(self, **kwargs: Any) -> None:
         self.__schedules: dict[str,
                                float] = kwargs.pop("fee_schedules",
                                                    dict(DEFAULT_FEE_SCHEDULES))
+        self.__penal_daily_rate: float = kwargs.pop(
+            "penal_interest_daily_rate", 0.0)
+        self.__late_percent: float = kwargs.pop("late_payment_percent", 0.0)
+        self.__max_penal: float = kwargs.pop("max_penal_interest_per_loan",
+                                             0.0)
         super().__init__(**kwargs)
         self.__fees: dict[str, dict[str, Any]] = {}
-        self._repo: BatchedStoreRepository[dict[str,
-                                                dict[str,
-                                                     Any]]] = self.batched_repo(
-                                                         "fees",
-                                                         dict,
-                                                         sync_interval=10)
+        self._repo: BatchedStoreRepository[dict[str, dict[
+            str, Any]]] = self.batched_repo("fees", dict, sync_interval=10)
         loaded = self._repo.load(default={})
         if loaded:
             self.__fees = loaded
@@ -50,17 +59,13 @@ class FeeService(StatefulService):
                  loan_id: str,
                  fee_type: str,
                  principal: float = 0.0,
+                 overdue_days: int = 0,
+                 overdue_amount: float = 0.0,
                  correlation_id: str = "") -> None:
         """Assess a fee and persist it.  Called directly (not via bus)."""
         with self.state_lock:
-            schedules = self.__schedules
-            if not loan_id or fee_type not in schedules:
-                if not loan_id:
-                    logger.warning("fee.assess missing loan_id, ignored")
-                else:
-                    logger.warning(
-                        "fee.assess with unknown fee_type %r, ignored",
-                        fee_type)
+            if not loan_id:
+                logger.warning("fee.assess missing loan_id, ignored")
                 return
             total_assessed = sum(
                 r.get("amount", 0.0) for r in self.__fees.values()
@@ -69,23 +74,28 @@ class FeeService(StatefulService):
             if total_assessed >= MAX_FEE_PER_LOAN:
                 logger.warning(
                     "fee cap reached for loan %s (total %.2f >= %.2f), "
-                    "skipping fee assessment",
-                    loan_id, total_assessed, MAX_FEE_PER_LOAN)
+                    "skipping fee assessment", loan_id, total_assessed,
+                    MAX_FEE_PER_LOAN)
                 return
-            if fee_type == "origination":
-                amount = principal * schedules["origination"]
-            else:
-                amount = schedules[fee_type]
 
+            amount = self.__compute_amount(fee_type, principal, overdue_days,
+                                           overdue_amount)
             if not math.isfinite(amount):
                 logger.error("non-finite fee amount %s for loan %s, skipping",
                              amount, loan_id)
                 return
+
+            if amount <= 0:
+                logger.debug(
+                    "zero/negative fee amount %s for loan %s, skipped", amount,
+                    loan_id)
+                return
+
             fee_id: str = f"fee_{loan_id}_{fee_type}_{int(datetime.now(timezone.utc).timestamp())}"
             fee_record = {
                 "loan_id": loan_id,
                 "fee_type": fee_type,
-                "amount": amount,
+                "amount": round(amount, 2),
                 "assessed_at": datetime.now(timezone.utc).isoformat(),
                 "paid": False,
             }
@@ -98,16 +108,38 @@ class FeeService(StatefulService):
                     "fee_id": fee_id,
                     "loan_id": loan_id,
                     "fee_type": fee_type,
-                    "amount": amount,
+                    "amount": round(amount, 2),
                 },
                 correlation_id=correlation_id,
             )
+
+    def __compute_amount(self, fee_type: str, principal: float,
+                         overdue_days: int, overdue_amount: float) -> float:
+        """Compute the fee amount based on type and parameters."""
+        if fee_type == "origination":
+            return principal * self.__schedules.get("origination", 0.0)
+        if fee_type == "prepayment":
+            return self.__schedules.get("prepayment", 0.0)
+        if fee_type == "late_payment":
+            return self.__schedules.get("late_payment", 0.0)
+        if fee_type == "late_payment_percent":
+            return overdue_amount * self.__late_percent / 100.0
+        if fee_type == "penal_interest":
+            daily = self.__penal_daily_rate / 100.0
+            penal = overdue_amount * daily * overdue_days
+            if self.__max_penal > 0 and penal > self.__max_penal:
+                penal = self.__max_penal
+            return penal
+        if fee_type == "service":
+            return self.__schedules.get("service", 0.0)
+        return 0.0
 
     def handle(self, event: Event) -> None:
         """Assess and pay fees based on incoming events.
 
         Supports fee assessment (``fee.assess``), fee payment (``fee.pay``),
-        and automatic late-payment fees on overdue loans.
+        automatic late-payment fees on overdue loans, and penal interest
+        accrual.
 
         Args:
             event: The incoming event.
@@ -117,6 +149,8 @@ class FeeService(StatefulService):
                 loan_id=event.payload.get("loan_id", ""),
                 fee_type=event.payload.get("fee_type", ""),
                 principal=get_finite(event.payload, "principal", 0.0),
+                overdue_days=event.payload.get("overdue_days", 0),
+                overdue_amount=event.payload.get("overdue_amount", 0.0),
                 correlation_id=event.correlation_id,
             )
 
@@ -151,8 +185,8 @@ class FeeService(StatefulService):
     def health_check(self) -> dict[str, Any]:
         """Fee-specific health: reports total fee count and pending fees."""
         with self.state_lock:
-            pending = sum(
-                1 for r in self.__fees.values() if not r.get("paid", False))
+            pending = sum(1 for r in self.__fees.values()
+                          if not r.get("paid", False))
             return {
                 **super().health_check(),
                 "fee_count": len(self.__fees),

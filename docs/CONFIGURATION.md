@@ -54,6 +54,12 @@ config = Configuration.default()
 | `fee` | `FeeConfig` | `FeeConfig()` | Fee schedules |
 | `governance` | `GovernanceConfig` | `GovernanceConfig()` | Protocol governance parameters |
 | `audit` | `AuditConfig` | `AuditConfig()` | Audit ledger limits |
+| `kfs` | `KfsConfig` | `KfsConfig()` | Key Fact Statement config (RBI DLG) |
+| `npa` | `NpaConfig` | `NpaConfig()` | NPA classification and provisioning (RBI) |
+| `dpdpa` | `DpdpaConfig` | `DpdpaConfig()` | DPDPA 2023 data protection (India) |
+| `razorpay` | `RazorpayConfig` | `RazorpayConfig()` | Razorpay payment gateway (India) |
+| `credit_bureau` | `CreditBureauConfig` | `CreditBureauConfig()` | CIBIL/Experian/Equifax + CKYC |
+| `underwriting` | `UnderwritingConfig` | `UnderwritingConfig()` | Underwriting rules and thresholds |
 | `data_dir` | `str` | `"./data"` | Filesystem store data directory |
 | `services` | `dict[str, ServiceConfig]` | `{}` | Per-service enablement/priority |
 
@@ -131,6 +137,97 @@ config = Configuration.default()
 | `auto_restart` | `bool` | `true` |
 | `max_restarts` | `int` | `3` |
 | `backoff_seconds` | `float` | `1.0` |
+
+### KfsConfig (RBI Key Fact Statement)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `cooling_off_days` | `int` | `3` | Free-look period per RBI DLG |
+| `disclosure_version` | `str` | `"1.0"` | KFS template version |
+
+### NpaConfig (RBI Asset Classification)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `standard_provisioning_rate` | `float` | `0.0025` | 0.25% provisioning for standard assets |
+| `substandard_provisioning_rate` | `float` | `0.15` | 15% for substandard assets |
+| `doubtful_provisioning_rate_secured` | `float` | `0.25` | 25% for doubtful secured assets |
+| `loss_provisioning_rate` | `float` | `1.0` | 100% for loss assets |
+| `sma_0_days` | `int` | `30` | SMA-0 threshold (30 DPD) |
+| `sma_1_days` | `int` | `60` | SMA-1 threshold (60 DPD) |
+| `sma_2_days` | `int` | `90` | SMA-2 threshold (90 DPD) |
+| `npa_days` | `int` | `90` | NPA classification at 90 DPD |
+| `dlg_trigger_days` | `int` | `120` | DLG trigger at 120+ DPD |
+
+### DpdpaConfig (DPDPA 2023)
+
+#### ConsentConfig
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `required_purposes` | `list[str]` | `[kyc_verification, credit_bureau_reporting, loan_servicing, collection, communication_transactional]` | Purposes for which consent is required |
+| `consent_validity_days` | `int` | `365` | Consent validity period |
+| `withdrawal_cooldown_days` | `int` | `0` | Cooldown before re-consent after withdrawal |
+
+#### DsrConfig
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `response_time_days` | `int` | `30` | DSR fulfillment timeline (DPDPA mandate) |
+| `grievance_response_days` | `int` | `15` | Grievance response timeline |
+| `dpo_email` | `str` | `""` | Data Protection Officer email |
+| `dpo_phone` | `str` | `""` | Data Protection Officer phone |
+
+DpdpaConfig top-level fields:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `consent` | `ConsentConfig` | `ConsentConfig()` | Consent management |
+| `dsr` | `DsrConfig` | `DsrConfig()` | Data Subject Rights |
+| `data_retention_years` | `int` | `8` | Data retention per IT Act |
+| `kyc_retention_years` | `int` | `5` | KYC retention per PMLA |
+| `breach_notification_hours` | `int` | `72` | Breach notification window |
+| `enable_breach_detection` | `bool` | `true` | Enable breach detection |
+| `enable_auto_purge` | `bool` | `false` | Auto-purge expired data |
+
+### RazorpayConfig (Payment Gateway)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `key_id` | `str` | `""` | Razorpay API key ID |
+| `key_secret` | `str` | `""` | Razorpay API key secret |
+| `webhook_secret` | `str` | `""` | Webhook signing secret |
+| `api_base_url` | `str` | `https://api.razorpay.com/v1` | API base URL |
+| `upi_autopay_enabled` | `bool` | `true` | Enable UPI Autopay |
+| `enable_nach` | `bool` | `true` | Enable e-NACH mandates |
+
+### CreditBureauConfig (CIBIL / Experian / Equifax / CKYC)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `cibil_enabled` | `bool` | `true` | Enable CIBIL check |
+| `cibil_api_key` | `str` | `""` | CIBIL API key |
+| `cibil_api_base` | `str` | `https://api.cibil.com/v1` | CIBIL API base |
+| `experian_enabled` | `bool` | `false` | Enable Experian check |
+| `experian_api_key` | `str` | `""` | Experian API key |
+| `equifax_enabled` | `bool` | `false` | Enable Equifax check |
+| `equifax_api_key` | `str` | `""` | Equifax API key |
+| `ckyc_enabled` | `bool` | `true` | Enable CKYC verification |
+| `ckyc_api_key` | `str` | `""` | CKYC API key |
+| `ckyc_api_base` | `str` | `https://api.ckycindia.in/v1` | CKYC API base |
+| `timeout_seconds` | `int` | `30` | HTTP timeout |
+
+### UnderwritingConfig
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_default_probability` | `float` | `0.25` | Max default probability for approval |
+| `min_credit_score` | `int` | `650` | Min CIBIL/credit score |
+| `max_dti_ratio` | `float` | `0.5` | Max debt-to-income ratio |
+| `max_ltv_ratio` | `float` | `0.8` | Max loan-to-value ratio |
+| `max_principal` | `float` | `10_000_000` | Max loan amount |
+| `min_principal` | `float` | `1_000` | Min loan amount |
+| `max_tenor_months` | `int` | `360` | Max loan tenure |
 
 ### ServiceConfig
 
@@ -228,8 +325,8 @@ logging level=INFO, metrics enabled, etc.).
 
 The platform defines 28 nano services (`underwrite/__config__.py:461`):
 
-`audit`, `collateral`, `collection`, `communication`, `decision`,
-`disbursement`, `document`, `fee`, `fraud`, `governance`, `graph`, `identity`,
-`mechanism`, `npa`, `notification`, `origination`, `payment`, `pricing`,
-`quote`, `recovery`, `reporting`, `risk`, `servicing`, `settlement`,
-`statement`, `underwriter`, `workflow`
+`audit`, `collateral`, `collection`, `communication`, `consent`, `credit_bureau`,
+`decision`, `disbursement`, `document`, `dsr`, `fee`, `fraud`, `governance`,
+`graph`, `identity`, `kfs`, `mechanism`, `npa`, `notification`, `origination`,
+`payment`, `pricing`, `quote`, `recovery`, `reporting`, `risk`, `servicing`,
+`settlement`, `statement`, `underwriter`, `workflow`

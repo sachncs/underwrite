@@ -1,6 +1,6 @@
 """Tests for RecoveryService — multi-stage post-default recovery orchestration.
 
-Tests verify the full recovery workflow:
+Tests verify the full recovery workflow with store-backed persistence:
   DEFAULT_OCCURRED -> RECOVERY_STARTED -> recovery.offer ->
   recovery.offer_response (accepted) -> PAYMENT_PLAN ->
   PAYMENT_RECEIVED -> RECOVERY_COMPLETED
@@ -13,8 +13,10 @@ from underwrite.__events__ import Event, EventType
 from underwrite.services.recovery.service import RecoveryService
 
 
-def recovery(bus=None) -> RecoveryService:
-    return RecoveryService(service_id="recovery", bus=bus)
+def _recovery(bus=None) -> RecoveryService:
+    svc = RecoveryService(service_id="recovery", bus=bus)
+    svc._repo.save({})
+    return svc
 
 
 class TestRecoveryService:
@@ -23,7 +25,7 @@ class TestRecoveryService:
         bus = LocalBus()
         received: list[Event] = []
         bus.subscribe(EventType.RECOVERY_STARTED, lambda e: received.append(e))
-        svc = recovery(bus=bus)
+        svc = _recovery(bus=bus)
         bus.start()
         svc.handle(
             Event(event_type=EventType.DEFAULT_OCCURRED,
@@ -44,7 +46,7 @@ class TestRecoveryService:
         offers: list[Event] = []
         bus.subscribe(EventType.RECOVERY_STARTED, lambda e: started.append(e))
         bus.subscribe("recovery.offer", lambda e: offers.append(e))
-        svc = recovery(bus=bus)
+        svc = _recovery(bus=bus)
         bus.start()
         svc.handle(
             Event(event_type=EventType.DEFAULT_OCCURRED,
@@ -63,7 +65,7 @@ class TestRecoveryService:
         completed: list[Event] = []
         bus.subscribe(EventType.RECOVERY_COMPLETED,
                       lambda e: completed.append(e))
-        svc = recovery(bus=bus)
+        svc = _recovery(bus=bus)
         bus.start()
         svc.handle(
             Event(event_type=EventType.DEFAULT_OCCURRED,
@@ -79,7 +81,7 @@ class TestRecoveryService:
         completed: list[Event] = []
         bus.subscribe(EventType.RECOVERY_COMPLETED,
                       lambda e: completed.append(e))
-        svc = recovery(bus=bus)
+        svc = _recovery(bus=bus)
         bus.start()
         svc.handle(
             Event(event_type=EventType.DEFAULT_OCCURRED,
@@ -103,7 +105,7 @@ class TestRecoveryService:
         bus = LocalBus()
         offers: list[Event] = []
         bus.subscribe("recovery.offer", lambda e: offers.append(e))
-        svc = recovery(bus=bus)
+        svc = _recovery(bus=bus)
         bus.start()
         svc.handle(
             Event(event_type=EventType.DEFAULT_OCCURRED,
@@ -127,7 +129,7 @@ class TestRecoveryService:
         bus = LocalBus()
         escalated: list[Event] = []
         bus.subscribe("recovery.escalated", lambda e: escalated.append(e))
-        svc = recovery(bus=bus)
+        svc = _recovery(bus=bus)
         bus.start()
         svc.handle(
             Event(event_type=EventType.DEFAULT_OCCURRED,
@@ -152,7 +154,7 @@ class TestRecoveryService:
         bus = LocalBus()
         started: list[Event] = []
         bus.subscribe(EventType.RECOVERY_STARTED, lambda e: started.append(e))
-        svc = recovery(bus=bus)
+        svc = _recovery(bus=bus)
         bus.start()
         svc.handle(
             Event(event_type=EventType.DEFAULT_OCCURRED,
@@ -176,7 +178,7 @@ class TestRecoveryService:
         bus = LocalBus()
         progress: list[Event] = []
         bus.subscribe("recovery.progress", lambda e: progress.append(e))
-        svc = recovery(bus=bus)
+        svc = _recovery(bus=bus)
         bus.start()
         svc.handle(
             Event(event_type=EventType.DEFAULT_OCCURRED,
@@ -201,7 +203,7 @@ class TestRecoveryService:
         completed: list[Event] = []
         bus.subscribe(EventType.RECOVERY_COMPLETED,
                       lambda e: completed.append(e))
-        svc = recovery(bus=bus)
+        svc = _recovery(bus=bus)
         bus.start()
         svc.handle(
             Event(event_type=EventType.DEFAULT_OCCURRED,
@@ -231,7 +233,7 @@ class TestRecoveryService:
         bus = LocalBus()
         progress: list[Event] = []
         bus.subscribe("recovery.progress", lambda e: progress.append(e))
-        svc = recovery(bus=bus)
+        svc = _recovery(bus=bus)
         bus.start()
         svc.handle(
             Event(event_type=EventType.PAYMENT_RECEIVED,
@@ -246,7 +248,7 @@ class TestRecoveryService:
         bus = LocalBus()
         started: list[Event] = []
         bus.subscribe(EventType.RECOVERY_STARTED, lambda e: started.append(e))
-        svc = recovery(bus=bus)
+        svc = _recovery(bus=bus)
         bus.start()
         svc.handle(
             Event(event_type="recovery.offer_response",
@@ -261,7 +263,7 @@ class TestRecoveryService:
         bus = LocalBus()
         started: list[Event] = []
         bus.subscribe(EventType.RECOVERY_STARTED, lambda e: started.append(e))
-        svc = recovery(bus=bus)
+        svc = _recovery(bus=bus)
         bus.start()
         svc.handle(Event(event_type="seed.added", source="test", payload={}))
         svc.handle(
@@ -269,3 +271,50 @@ class TestRecoveryService:
                   source="test",
                   payload={}))
         assert len(started) == 0
+
+    def test_recovery_state_persisted(self) -> None:
+        bus = LocalBus()
+        svc = _recovery(bus=bus)
+        bus.start()
+        svc.handle(
+            Event(event_type=EventType.DEFAULT_OCCURRED,
+                  source="test",
+                  payload={
+                      "borrower": "persist_test",
+                      "principal": 50000
+                  }))
+        recovery = svc.get_recovery("persist_test")
+        assert recovery is not None
+        assert recovery["borrower"] == "persist_test"
+        assert recovery["principal"] == 50000.0
+        assert recovery["stage"] == "negotiation"
+
+    def test_duplicate_default_skipped(self) -> None:
+        bus = LocalBus()
+        started: list[Event] = []
+        bus.subscribe(EventType.RECOVERY_STARTED, lambda e: started.append(e))
+        svc = _recovery(bus=bus)
+        bus.start()
+        svc.handle(
+            Event(event_type=EventType.DEFAULT_OCCURRED,
+                  source="test",
+                  payload={
+                      "borrower": "dup_test",
+                      "principal": 50000
+                  }))
+        svc.handle(
+            Event(event_type=EventType.DEFAULT_OCCURRED,
+                  source="test",
+                  payload={
+                      "borrower": "dup_test",
+                      "principal": 50000
+                  }))
+        assert len(started) == 1
+
+    def test_health_check_returns_counts(self) -> None:
+        bus = LocalBus()
+        svc = _recovery(bus=bus)
+        bus.start()
+        health = svc.health_check()
+        assert "active_recoveries" in health
+        assert "total_recoveries" in health

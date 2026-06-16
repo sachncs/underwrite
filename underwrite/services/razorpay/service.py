@@ -1,0 +1,407 @@
+"""Razorpay payment gateway service.
+
+Integrates with Razorpay for payment collection via:
+  - Payment orders (one-time)
+  - Payment links (shareable)
+  - Subscriptions (UPI Autopay recurring)
+  - e-NACH mandates (electronic mandates)
+  - Webhook processing (payment success/failure)
+
+Emits domain events for each lifecycle transition so downstream
+services (payment, servicing, notification) can react.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from typing import Any
+
+from underwrite.__events__ import Event, EventType
+from underwrite.__logger__ import logger
+from underwrite.services.base import StatefulService
+from underwrite.services.persistence import BatchedStoreRepository
+from underwrite.services.razorpay.client import (
+    HttpRazorpayClient,
+    MockRazorpayClient,
+    RazorpayClient,
+    RazorpayError,
+)
+from underwrite.validate import get_finite
+
+
+class RazorpayService(StatefulService):
+    """Manages Razorpay order/subscription/payment lifecycle.
+
+    Handles creation of payment orders (one-time), payment links,
+    recurring subscriptions (UPI Autopay), e-NACH mandates, and
+    processing of webhook events for payment confirmation.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        client_kw = {
+            k: kwargs.pop(k)
+            for k in list(kwargs.keys())
+            if k in ("key_id", "key_secret", "webhook_secret",
+                     "api_base_url", "timeout_seconds")
+        }
+        super().__init__(**kwargs)
+        self.__client: RazorpayClient = self._build_client(**client_kw)
+        self.__records: dict[str, dict[str, Any]] = {}
+        self._repo: BatchedStoreRepository[dict[str, dict[
+            str, Any]]] = self.batched_repo("razorpay", dict, sync_interval=10)
+        loaded = self._repo.load(default={})
+        if loaded:
+            self.__records = loaded
+
+        self._handlers: dict[str, Any] = {
+            EventType.RAZORPAY_ORDER_CREATE: self.__on_order_create,
+            EventType.RAZORPAY_SUBSCRIBE: self.__on_subscription_create,
+            EventType.RAZORPAY_WEBHOOK_RECEIVED: self.__on_webhook_received,
+        }
+
+    def _build_client(self, **kwargs: Any) -> RazorpayClient:
+        """Build the Razorpay client (real or mock based on config).
+
+        Subclasses can override to inject a custom client.
+        """
+        key_id = kwargs.get("key_id", "") or ""
+        key_secret = kwargs.get("key_secret", "") or ""
+        if key_id and key_secret:
+            return HttpRazorpayClient(
+                key_id=key_id,
+                key_secret=key_secret,
+                webhook_secret=kwargs.get("webhook_secret", "") or "",
+                api_base_url=kwargs.get("api_base_url",
+                                        "https://api.razorpay.com/v1"),
+            )
+        logger.info("no Razorpay credentials configured, using mock client")
+        return MockRazorpayClient()
+
+    @property
+    def client(self) -> RazorpayClient:
+        """Expose the underlying client for testing."""
+        return self.__client
+
+    def handle(self, event: Event) -> None:
+        handler = self._handlers.get(event.event_type)
+        if handler is not None:
+            handler(event)
+
+    # -- Order management ----------------------------------------------------
+
+    def __on_order_create(self, event: Event) -> None:
+        p = event.payload
+        loan_id: str = p.get("loan_id", "")
+        if not loan_id:
+            logger.warning("RAZORPAY_ORDER_CREATE missing loan_id, skipped")
+            return
+        amount_paise: int = int(
+            get_finite(p, "amount", 0.0) * 100)
+        currency: str = p.get("currency", "INR")
+        receipt: str = p.get("receipt", f"loan_{loan_id}")
+        notes: dict[str, str] = {"loan_id": loan_id}
+
+        try:
+            order = self.__client.create_order(
+                amount=amount_paise,
+                currency=currency,
+                receipt=receipt,
+                notes=notes,
+            )
+        except RazorpayError as exc:
+            logger.error("failed to create Razorpay order for loan %s: %s",
+                         loan_id, exc)
+            return
+
+        self._save_record(order.id, {
+            "type": "order",
+            "loan_id": loan_id,
+            "order_id": order.id,
+            "amount_paise": amount_paise,
+            "currency": currency,
+            "receipt": receipt,
+            "status": order.status,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        self.emit(
+            EventType.RAZORPAY_ORDER_CREATED,
+            {
+                "loan_id": loan_id,
+                "order_id": order.id,
+                "amount": amount_paise / 100.0,
+                "currency": currency,
+                "status": order.status,
+            },
+            correlation_id=event.correlation_id,
+        )
+
+    # -- Subscription (UPI Autopay / e-NACH) ---------------------------------
+
+    def __on_subscription_create(self, event: Event) -> None:
+        p = event.payload
+        loan_id: str = p.get("loan_id", "")
+        if not loan_id:
+            logger.warning(
+                "RAZORPAY_SUBSCRIBE missing loan_id, skipped")
+            return
+        plan_id: str = p.get("plan_id", "") or ""
+        if not plan_id:
+            logger.warning("RAZORPAY_SUBSCRIBE missing plan_id")
+            return
+        total_count: int = int(get_finite(p, "total_count", 12))
+        notes: dict[str, str] = {"loan_id": loan_id}
+
+        try:
+            sub = self.__client.create_subscription(
+                plan_id=plan_id,
+                total_count=total_count,
+                customer_notify=True,
+                notes=notes,
+            )
+        except RazorpayError as exc:
+            logger.error(
+                "failed to create Razorpay subscription for loan %s: %s",
+                loan_id, exc)
+            return
+
+        self._save_record(sub.id, {
+            "type": "subscription",
+            "loan_id": loan_id,
+            "subscription_id": sub.id,
+            "plan_id": plan_id,
+            "status": sub.status,
+            "total_count": total_count,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        self.emit(
+            EventType.RAZORPAY_SUBSCRIPTION_CREATED,
+            {
+                "loan_id": loan_id,
+                "subscription_id": sub.id,
+                "plan_id": plan_id,
+                "status": sub.status,
+                "total_count": total_count,
+            },
+            correlation_id=event.correlation_id,
+        )
+
+    # -- Webhook processing --------------------------------------------------
+
+    def __on_webhook_received(self, event: Event) -> None:
+        """Process an incoming Razorpay webhook event.
+
+        Validates the signature before processing the payload.
+        Emits the appropriate domain event (captured, failed, refunded).
+        """
+        p = event.payload
+        payload_bytes_str: str = p.get("payload", "")
+        signature: str = p.get("signature", "")
+        webhook_secret: str = p.get("webhook_secret", "")
+
+        if not payload_bytes_str or not signature:
+            logger.warning("webhook missing payload or signature, skipped")
+            return
+
+        payload_bytes = payload_bytes_str.encode("utf-8")
+        valid = self.__client.verify_webhook(payload_bytes, signature,
+                                             webhook_secret)
+        if not valid:
+            logger.warning("invalid webhook signature, dropped")
+            return
+
+        try:
+            data = json.loads(payload_bytes_str)
+        except (json.JSONDecodeError, TypeError) as exc:
+            logger.warning("invalid webhook JSON payload: %s", exc)
+            return
+
+        event_type = data.get("event", "")
+        payment_data = data.get("payload", {}).get("payment", {}).get(
+            "entity", {})
+        subscription_data = data.get("payload", {}).get("subscription",
+                                                        {}).get("entity", {})
+
+        # Extract identifiers from whichever entity is available
+        payment_id: str = payment_data.get("id", "")
+        order_id: str = payment_data.get("order_id", "")
+        subscription_id: str = subscription_data.get("id", "")
+        amount_paise: int = payment_data.get("amount", 0)
+
+        # Loan_id may be in payment notes or subscription notes
+        loan_id: str = (payment_data.get("notes", {}) or {}).get("loan_id",
+                                                                  "")
+        if not loan_id:
+            loan_id = (subscription_data.get("notes", {}) or {}).get(
+                "loan_id", "")
+
+        # Payment events must have a payment entity
+        is_payment_event = event_type.startswith("payment.") or event_type.startswith("refund.")
+        if is_payment_event and not payment_data:
+            logger.warning("webhook missing payment entity")
+            return
+
+        if is_payment_event and not loan_id:
+            logger.debug("webhook payment without loan_id, ignoring")
+            return
+
+        # Subscription events must have a subscription entity
+        is_sub_event = event_type.startswith("subscription.")
+        if is_sub_event and not subscription_data:
+            logger.warning("webhook missing subscription entity")
+            return
+
+        if is_sub_event and not loan_id:
+            logger.debug("webhook subscription without loan_id, ignoring")
+            return
+
+        if event_type == "payment.captured":
+            self._on_payment_captured(loan_id, payment_id, order_id,
+                                      amount_paise, payment_data,
+                                      event.correlation_id)
+        elif event_type == "payment.failed":
+            self._on_payment_failed(loan_id, payment_id, order_id,
+                                    amount_paise, payment_data,
+                                    event.correlation_id)
+        elif event_type in ("payment.refunded", "refund.created"):
+            self._on_payment_refunded(loan_id, payment_id, order_id,
+                                      amount_paise, payment_data,
+                                      event.correlation_id)
+        elif event_type == "subscription.charged":
+            self._on_subscription_charged(loan_id, subscription_id,
+                                          amount_paise, payment_data,
+                                          event.correlation_id)
+        elif event_type == "subscription.failed":
+            self._on_subscription_failed(loan_id, subscription_id,
+                                         payment_data,
+                                         event.correlation_id)
+        elif event_type == "subscription.activated":
+            self._on_mandate_active(loan_id, subscription_id,
+                                    event.correlation_id)
+        elif event_type in ("subscription.deactivated",
+                            "subscription.cancelled"):
+            self._on_mandate_inactive(loan_id, subscription_id,
+                                      event.correlation_id)
+
+    def _on_payment_captured(self, loan_id: str, payment_id: str,
+                             order_id: str, amount_paise: int,
+                             payment_data: dict[str, Any],
+                             correlation_id: str) -> None:
+        self.emit(
+            EventType.RAZORPAY_PAYMENT_CAPTURED,
+            {
+                "loan_id": loan_id,
+                "payment_id": payment_id,
+                "order_id": order_id,
+                "amount": amount_paise / 100.0,
+                "method": payment_data.get("method", ""),
+            },
+            correlation_id=correlation_id,
+        )
+
+    def _on_payment_failed(self, loan_id: str, payment_id: str,
+                           order_id: str, amount_paise: int,
+                           payment_data: dict[str, Any],
+                           correlation_id: str) -> None:
+        self.emit(
+            EventType.RAZORPAY_PAYMENT_FAILED,
+            {
+                "loan_id": loan_id,
+                "payment_id": payment_id,
+                "order_id": order_id,
+                "amount": amount_paise / 100.0,
+                "error_code": payment_data.get("error_code", ""),
+                "error_description": payment_data.get("error_description",
+                                                      ""),
+            },
+            correlation_id=correlation_id,
+        )
+
+    def _on_payment_refunded(self, loan_id: str, payment_id: str,
+                              order_id: str, amount_paise: int,
+                              payment_data: dict[str, Any],
+                              correlation_id: str) -> None:
+        self.emit(
+            EventType.RAZORPAY_PAYMENT_REFUNDED,
+            {
+                "loan_id": loan_id,
+                "payment_id": payment_id,
+                "order_id": order_id,
+                "amount": amount_paise / 100.0,
+            },
+            correlation_id=correlation_id,
+        )
+
+    def _on_subscription_charged(self, loan_id: str,
+                                  subscription_id: str, amount_paise: int,
+                                  payment_data: dict[str, Any],
+                                  correlation_id: str) -> None:
+        self.emit(
+            EventType.RAZORPAY_SUBSCRIPTION_CHARGED,
+            {
+                "loan_id": loan_id,
+                "subscription_id": subscription_id,
+                "payment_id": payment_data.get("id", ""),
+                "amount": amount_paise / 100.0,
+            },
+            correlation_id=correlation_id,
+        )
+
+    def _on_subscription_failed(self, loan_id: str,
+                                 subscription_id: str,
+                                 payment_data: dict[str, Any],
+                                 correlation_id: str) -> None:
+        self.emit(
+            EventType.RAZORPAY_SUBSCRIPTION_FAILED,
+            {
+                "loan_id": loan_id,
+                "subscription_id": subscription_id,
+                "payment_id": payment_data.get("id", ""),
+                "error_code": payment_data.get("error_code", ""),
+                "error_description": payment_data.get("error_description",
+                                                      ""),
+            },
+            correlation_id=correlation_id,
+        )
+
+    def _on_mandate_active(self, loan_id: str,
+                            subscription_id: str,
+                            correlation_id: str) -> None:
+        self.emit(
+            EventType.RAZORPAY_MANDATE_ACTIVE,
+            {
+                "loan_id": loan_id,
+                "subscription_id": subscription_id,
+                "status": "active",
+            },
+            correlation_id=correlation_id,
+        )
+
+    def _on_mandate_inactive(self, loan_id: str,
+                              subscription_id: str,
+                              correlation_id: str) -> None:
+        self.emit(
+            EventType.RAZORPAY_MANDATE_INACTIVE,
+            {
+                "loan_id": loan_id,
+                "subscription_id": subscription_id,
+                "status": "inactive",
+            },
+            correlation_id=correlation_id,
+        )
+
+    # -- Persistence helpers -------------------------------------------------
+
+    def _save_record(self, key: str, record: dict[str, Any]) -> None:
+        with self.state_lock:
+            store_key = f"razorpay:{key}"
+            self.store.set(store_key, record)
+            self.__records[store_key] = record
+            self._repo.incr_and_maybe_sync(self.__records)
+
+    def health_check(self) -> dict[str, Any]:
+        with self.state_lock:
+            return {
+                **super().health_check(),
+                "razorpay_records": len(self.__records),
+            }

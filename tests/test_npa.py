@@ -3,6 +3,9 @@
 Tests verify behavior through:
   - Emitted NPA_BUCKET_CHANGED and DLG_TRIGGERED events
   - Edge cases: unknown borrower, DLG invoked only once, bucket boundaries
+  - SMA classification (SMA-0, SMA-1, SMA-2)
+  - Provisioning computation per RBI bucket
+  - Income recognition suspension for NPA accounts
 """
 
 from __future__ import annotations
@@ -189,3 +192,171 @@ class TestLoanTracking:
                   }))
         assert len(dlg) == 1  # only x exceeds threshold
         assert dlg[0].payload["loan_id"] == "x"
+
+
+class TestSmaClassification:
+
+    def test_sma_0_at_1_day(self) -> None:
+        assert NPAService._sma_classify(1) == "sma_0"
+
+    def test_sma_0_at_30_days(self) -> None:
+        assert NPAService._sma_classify(30) == "sma_0"
+
+    def test_sma_1_at_31_days(self) -> None:
+        assert NPAService._sma_classify(31) == "sma_1"
+
+    def test_sma_1_at_60_days(self) -> None:
+        assert NPAService._sma_classify(60) == "sma_1"
+
+    def test_sma_2_at_61_days(self) -> None:
+        assert NPAService._sma_classify(61) == "sma_2"
+
+    def test_sma_2_at_90_days(self) -> None:
+        assert NPAService._sma_classify(90) == "sma_2"
+
+    def test_sma_empty_for_0_days(self) -> None:
+        assert NPAService._sma_classify(0) == ""
+
+    def test_sma_empty_for_negative_days(self) -> None:
+        assert NPAService._sma_classify(-1) == ""
+
+    def test_sma_empty_beyond_90_days(self) -> None:
+        assert NPAService._sma_classify(91) == ""
+
+
+class TestProvisioningAndIncomeSuspension:
+
+    def test_provisioning_amount_computed(self) -> None:
+        bus = LocalBus()
+        prov_events: list[Event] = []
+        bus.subscribe(EventType.PROVISIONING_COMPUTED,
+                      lambda e: prov_events.append(e))
+        svc = npa(bus=bus)
+        bus.start()
+        svc.handle(
+            Event(event_type=EventType.LOAN_ORIGINATED,
+                  source="test",
+                  payload={
+                      "borrower": "p1",
+                      "principal": 100000
+                  }))
+        svc.mark_overdue("p1", 150)
+        svc.handle(
+            Event(event_type=EventType.DEFAULT_OCCURRED,
+                  source="test",
+                  payload={
+                      "borrower": "p1",
+                      "principal": 100000
+                  }))
+        assert len(prov_events) >= 1
+        payload = prov_events[-1].payload
+        assert payload["borrower"] == "p1"
+        assert payload["bucket"] == "substandard"
+        assert payload["provisioning_rate"] == 0.15
+        assert payload["provisioning_amount"] == 15000.0  # 15% of 100000
+
+    def test_npa_account_suspends_income_recognition(self) -> None:
+        bus = LocalBus()
+        income_events: list[Event] = []
+        bus.subscribe(EventType.INCOME_RECOGNITION_SUSPENDED,
+                      lambda e: income_events.append(e))
+        svc = npa(bus=bus)
+        bus.start()
+        svc.handle(
+            Event(event_type=EventType.LOAN_ORIGINATED,
+                  source="test",
+                  payload={
+                      "borrower": "p2",
+                      "principal": 50000
+                  }))
+        svc.mark_overdue("p2", 150)
+        svc.handle(
+            Event(event_type=EventType.DEFAULT_OCCURRED,
+                  source="test",
+                  payload={
+                      "borrower": "p2",
+                      "principal": 50000
+                  }))
+        assert len(income_events) == 1
+        payload = income_events[0].payload
+        assert payload["borrower"] == "p2"
+        assert payload["bucket"] == "substandard"
+
+    def test_income_suspension_only_once(self) -> None:
+        bus = LocalBus()
+        income_events: list[Event] = []
+        bus.subscribe(EventType.INCOME_RECOGNITION_SUSPENDED,
+                      lambda e: income_events.append(e))
+        svc = npa(bus=bus)
+        bus.start()
+        svc.handle(
+            Event(event_type=EventType.LOAN_ORIGINATED,
+                  source="test",
+                  payload={
+                      "borrower": "p3",
+                      "principal": 50000
+                  }))
+        svc.mark_overdue("p3", 150)
+        svc.handle(
+            Event(event_type=EventType.DEFAULT_OCCURRED,
+                  source="test",
+                  payload={
+                      "borrower": "p3",
+                      "principal": 50000
+                  }))
+        svc.handle(
+            Event(event_type=EventType.DEFAULT_OCCURRED,
+                  source="test",
+                  payload={
+                      "borrower": "p3",
+                      "principal": 50000
+                  }))
+        assert len(income_events) == 1
+
+    def test_standard_account_does_not_suspend_income(self) -> None:
+        bus = LocalBus()
+        income_events: list[Event] = []
+        bus.subscribe(EventType.INCOME_RECOGNITION_SUSPENDED,
+                      lambda e: income_events.append(e))
+        svc = npa(bus=bus)
+        bus.start()
+        svc.handle(
+            Event(event_type=EventType.LOAN_ORIGINATED,
+                  source="test",
+                  payload={
+                      "borrower": "p4",
+                      "principal": 50000
+                  }))
+        svc.handle(
+            Event(event_type=EventType.DEFAULT_OCCURRED,
+                  source="test",
+                  payload={
+                      "borrower": "p4",
+                      "principal": 50000
+                  }))
+        assert len(income_events) == 0  # standard bucket, no suspension
+
+    def test_sma_event_emitted(self) -> None:
+        bus = LocalBus()
+        sma_events: list[Event] = []
+        bus.subscribe(EventType.SMA_CLASSIFIED,
+                      lambda e: sma_events.append(e))
+        svc = npa(bus=bus)
+        bus.start()
+        svc.handle(
+            Event(event_type=EventType.LOAN_ORIGINATED,
+                  source="test",
+                  payload={
+                      "borrower": "sma1",
+                      "principal": 100000
+                  }))
+        svc.mark_overdue("sma1", 45)
+        svc.handle(
+            Event(event_type=EventType.DEFAULT_OCCURRED,
+                  source="test",
+                  payload={
+                      "borrower": "sma1",
+                      "principal": 100000
+                  }))
+        assert len(sma_events) == 1
+        assert sma_events[0].payload["sma_bucket"] == "sma_1"

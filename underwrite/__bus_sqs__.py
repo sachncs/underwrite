@@ -159,8 +159,8 @@ class SqsBus(EventBus):
         for sid, handler in wildcards + specific:
             if not self.__circuit_breaker.allow_request(sid):
                 logger.warning(
-                    "circuit open for subscriber %s, sending %s to DLQ",
-                    sid, event.event_type)
+                    "circuit open for subscriber %s, sending %s to DLQ", sid,
+                    event.event_type)
                 self.__dlq.put(event, "circuit_open", sid)
                 continue
             try:

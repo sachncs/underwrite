@@ -22,6 +22,7 @@ class TestOriginationService:
         keys = svc.store.keys("origination:app_alice_")
         assert len(keys) == 1
         rec = svc.store.get(keys[0])
+        assert rec is not None
         assert rec["borrower"] == "alice"
         assert rec["principal"] == 50000
         assert rec["status"] == "created"
@@ -82,6 +83,7 @@ class TestOriginationService:
                   source="test",
                   payload={"application_id": app_id}))
         rec = svc.store.get(f"origination:{app_id}")
+        assert rec is not None
         assert rec["status"] == "submitted"
         assert "submitted_at" in rec
 
@@ -113,6 +115,7 @@ class TestOriginationService:
                   source="test",
                   payload={"application_id": app_id}))
         rec = svc.store.get(f"origination:{app_id}")
+        assert rec is not None
         assert rec["status"] == "submitted"
 
     def test_submit_emits_origination_submitted(self) -> None:
@@ -121,7 +124,9 @@ class TestOriginationService:
         received: list = []
         bus.subscribe(EventType.ORIGINATION_SUBMITTED,
                       lambda e: received.append(e))
-        svc = OriginationService(service_id="origination", bus=bus, store=store)
+        svc = OriginationService(service_id="origination",
+                                 bus=bus,
+                                 store=store)
         store.set("origination:app_1", {
             "borrower": "eve",
             "principal": 5000,

@@ -43,11 +43,12 @@ def store() -> MemoryStore:
 
 
 @pytest.fixture(scope="session")
-def postgres_dsn() -> str:
+def postgres_dsn() -> Generator[str, None, None]:
     """Return a Postgres DSN from env or start a testcontainer."""
     dsn = os.environ.get("UNDERWRITE_TEST_PG_DSN", "")
     if dsn:
-        return dsn
+        yield dsn
+        return
     try:
         from testcontainers.postgres import PostgresContainer
     except ImportError:
@@ -84,7 +85,7 @@ def pg_store(postgres_dsn: str) -> Generator[Store, None, None]:
 def _empty_plan() -> Any:
     from underwrite.__migrate__ import MigrationPlan
 
-    return MigrationPlan(migrations=[])
+    return MigrationPlan()
 
 
 # -- Bus fixture ---------------------------------------------------------------
@@ -130,7 +131,8 @@ def client() -> Any:
         from fastapi.testclient import TestClient
     except ImportError:
         pytest.skip("fastapi not installed")
-    app = create_app()
+    from unittest.mock import MagicMock
+    app = create_app(runtime=MagicMock())
     return TestClient(app)
 
 
@@ -183,7 +185,7 @@ def injecting_bus() -> LocalBus:
 
     class InjectingBus(LocalBus):
 
-        def publish(self, event: Event) -> None:
+        def publish(self, event: Event) -> str:
             msg = "injected publish failure"
             raise RuntimeError(msg)
 

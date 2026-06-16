@@ -140,9 +140,10 @@ class Runtime:
                     if isinstance(data, dict):
                         return {
                             k:
-                                "***REDACTED***" if any(
-                                    s in k.lower() for s in sensitive_fields)
-                                else self.__redact(v) for k, v in data.items()
+                            "***REDACTED***" if any(s in k.lower()
+                                                    for s in sensitive_fields)
+                            else self.__redact(v)
+                            for k, v in data.items()
                         }
                     if isinstance(data, (list, tuple)):
                         return [self.__redact(i) for i in data]
@@ -354,9 +355,9 @@ class Runtime:
                 "ok": (not self.__bus.is_stopped()) if hasattr(
                     self.__bus, "is_stopped") else True,
                 "subscribers":
-                    subs,
+                subs,
                 "dlq_count":
-                    dlq,
+                dlq,
             }
 
         self.__health.register("bus", _bus_health)
@@ -368,7 +369,7 @@ class Runtime:
             "services",
             lambda: {
                 "ok":
-                    True,
+                True,
                 "running": [
                     sid for sid, svc in self.__services.items()
                     if svc.is_running
@@ -471,13 +472,21 @@ class Runtime:
                 f"no class mapping for service: {service_name}")
         module = importlib.import_module(module_path)
         cls = getattr(module, class_name, None)
-        if cls is None or not (isinstance(cls, type) and
-                               issubclass(cls, NanoService)):
+        if cls is None or not (isinstance(cls, type)
+                               and issubclass(cls, NanoService)):
             raise ServiceNotFoundError(
                 f"class {class_name} not found in {module_path}")
         extra: dict[str, Any] = {}
         if service_name == "fee":
             extra["fee_schedules"] = dict(self.__config.fee.schedules)
+            extra[
+                "penal_interest_daily_rate"] = self.__config.fee.penal_interest_daily_rate
+            extra[
+                "late_payment_percent"] = self.__config.fee.late_payment_percent
+            extra[
+                "max_penal_interest_per_loan"] = self.__config.fee.max_penal_interest_per_loan
+        elif service_name == "kfs":
+            extra["cooling_off_days"] = 3
         elif service_name == "governance":
             extra["param_ranges"] = {
                 k: list(v)
@@ -485,9 +494,35 @@ class Runtime:
             }
             extra["param_defaults"] = dict(
                 self.__config.governance.param_defaults)
+        elif service_name == "npa":
+            nconf = self.__config.npa
+            extra[
+                "standard_provisioning_rate"] = nconf.standard_provisioning_rate
+            extra[
+                "substandard_provisioning_rate"] = nconf.substandard_provisioning_rate
+            extra[
+                "doubtful_provisioning_rate_secured"] = nconf.doubtful_provisioning_rate_secured
+            extra[
+                "loss_provisioning_rate"] = nconf.loss_provisioning_rate
+            extra["npa_days"] = nconf.npa_days
+            extra["dlg_trigger_days"] = nconf.dlg_trigger_days
         elif service_name == "audit":
             extra["max_ledger"] = self.__config.audit.max_ledger
             extra["export_url"] = self.__config.audit.export_url
+        elif service_name == "razorpay":
+            rconf = self.__config.razorpay
+            extra["key_id"] = rconf.key_id
+            extra["key_secret"] = rconf.key_secret
+            extra["webhook_secret"] = rconf.webhook_secret
+            extra["api_base_url"] = rconf.api_base_url
+        elif service_name == "consent":
+            cconf = self.__config.dpdpa.consent
+            extra["required_purposes"] = list(cconf.required_purposes)
+            extra["consent_validity_days"] = cconf.consent_validity_days
+        elif service_name == "dsr":
+            dconf = self.__config.dpdpa.dsr
+            extra["response_time_days"] = dconf.response_time_days
+            extra["grievance_response_days"] = dconf.grievance_response_days
         svc = cls(
             service_id=service_name,
             identity=identity,
@@ -577,8 +612,8 @@ class Runtime:
                     old = self.__services.pop(service_id)
                     old.stop()
                 except Exception:
-                    logger.exception("error stopping service %s during restart",
-                                     service_id)
+                    logger.exception(
+                        "error stopping service %s during restart", service_id)
                     continue
             try:
                 svc = self.register(service_id)

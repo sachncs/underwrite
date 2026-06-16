@@ -1,0 +1,128 @@
+"""Consent management — DPDPA 2023 compliant consent lifecycle.
+
+Records, tracks, and audits user consent for specific processing
+purposes. Supports consent withdrawal, expiry, and re-consent.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from underwrite.__events__ import Event, EventType
+from underwrite.__logger__ import logger
+from underwrite.services.base import StatefulService
+from underwrite.services.persistence import TypedStoreRepository
+
+
+class ConsentService(StatefulService):
+    """Manages the full consent lifecycle per DPDPA 2023.
+
+    Each consent record captures:
+      - user_id: the data subject
+      - purpose: why the data is processed
+      - status: active / withdrawn / expired
+      - recorded_at / withdrawn_at / expires_at timestamps
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.__required_purposes: list[str] = kwargs.pop(
+            "required_purposes", [])
+        self.__consent_validity_days: int = kwargs.pop(
+            "consent_validity_days", 365)
+        super().__init__(**kwargs)
+        self.__records: dict[str, dict[str, Any]] = {}
+        self._repo: TypedStoreRepository[dict[str, dict[str,
+                                                         Any]]] = self.store_repo(
+                                                             "consent", dict)
+        loaded = self._repo.load(default={})
+        if loaded:
+            self.__records = loaded
+
+    def handle(self, event: Event) -> None:
+        if event.event_type == EventType.CONSENT_RECORDED:
+            self._record_consent(event)
+        elif event.event_type == EventType.CONSENT_WITHDRAWN:
+            self._withdraw_consent(event)
+
+    def _record_consent(self, event: Event) -> None:
+        user_id: str = event.payload.get("user_id", "")
+        purpose: str = event.payload.get("purpose", "")
+        if not user_id or not purpose:
+            logger.warning("consent.recorded missing user_id or purpose")
+            return
+        key = f"{user_id}:{purpose}"
+        now = datetime.now(timezone.utc)
+        expires = now + timedelta(days=self.__consent_validity_days)
+        with self.state_lock:
+            self.__records[key] = {
+                "user_id": user_id,
+                "purpose": purpose,
+                "status": "active",
+                "recorded_at": now.isoformat(),
+                "expires_at": expires.isoformat(),
+                "ip_address": event.payload.get("ip_address", ""),
+                "user_agent": event.payload.get("user_agent", ""),
+            }
+            self.__sync()
+
+    def _withdraw_consent(self, event: Event) -> None:
+        user_id: str = event.payload.get("user_id", "")
+        purpose: str = event.payload.get("purpose", "")
+        if not user_id:
+            logger.warning("consent.withdrawn missing user_id")
+            return
+        with self.state_lock:
+            if purpose:
+                key = f"{user_id}:{purpose}"
+                record = self.__records.get(key)
+                if record and record.get("status") == "active":
+                    record["status"] = "withdrawn"
+                    record["withdrawn_at"] = datetime.now(
+                        timezone.utc).isoformat()
+            else:
+                for key, record in self.__records.items():
+                    if key.startswith(f"{user_id}:") and record.get(
+                            "status") == "active":
+                        record["status"] = "withdrawn"
+                        record["withdrawn_at"] = datetime.now(
+                            timezone.utc).isoformat()
+            self.__sync()
+
+    def get_consent(self, user_id: str, purpose: str) -> dict[str, Any] | None:
+        with self.state_lock:
+            return self.__records.get(f"{user_id}:{purpose}")
+
+    def has_active_consent(self, user_id: str, purpose: str) -> bool:
+        with self.state_lock:
+            record = self.__records.get(f"{user_id}:{purpose}")
+            if not record:
+                return False
+            if record.get("status") != "active":
+                return False
+            expires_str = record.get("expires_at", "")
+            if expires_str:
+                try:
+                    expires = datetime.fromisoformat(expires_str)
+                    if expires < datetime.now(timezone.utc):
+                        return False
+                except (ValueError, TypeError):
+                    pass
+            return True
+
+    def get_user_consents(self, user_id: str) -> list[dict[str, Any]]:
+        with self.state_lock:
+            return [
+                v for k, v in self.__records.items()
+                if k.startswith(f"{user_id}:")
+            ]
+
+    def check_missing_purposes(self, user_id: str) -> list[str]:
+        active_purposes = set(
+            r["purpose"] for r in self.get_user_consents(user_id)
+            if self.has_active_consent(user_id, r["purpose"]))
+        return [p for p in self.__required_purposes
+                if p not in active_purposes]
+
+    def __sync(self) -> None:
+        self._repo.save(self.__records)

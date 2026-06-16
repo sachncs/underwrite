@@ -50,12 +50,16 @@ class TestIdentityService:
             Event(event_type=EventType.IDENTITY_REGISTER,
                   source="test",
                   payload={"service_id": "audit"}))
-        original = store.get("identity:audit")["public_key"]
+        orig_rec = store.get("identity:audit")
+        assert orig_rec is not None
+        original = orig_rec["public_key"]
         svc.handle(
             Event(event_type=EventType.IDENTITY_ROTATE,
                   source="test",
                   payload={"service_id": "audit"}))
-        rotated = store.get("identity:audit")["public_key"]
+        rot_rec = store.get("identity:audit")
+        assert rot_rec is not None
+        rotated = rot_rec["public_key"]
         assert rotated != original
 
     def test_rotate_emits_rotated_event(self) -> None:
@@ -88,8 +92,11 @@ class TestIdentityService:
                   payload={"service_id": "b"}))
         assert store.get("identity:a") is not None
         assert store.get("identity:b") is not None
-        assert store.get("identity:a")["public_key"] != store.get(
-            "identity:b")["public_key"]
+        key_a = store.get("identity:a")
+        assert key_a is not None
+        key_b = store.get("identity:b")
+        assert key_b is not None
+        assert key_a["public_key"] != key_b["public_key"]
 
     def test_ignores_unrelated_events(self) -> None:
         store = MemoryStore()

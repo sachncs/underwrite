@@ -76,6 +76,7 @@ class TestCollectionService:
                       "delta_earned": 5000
                   }))
         loan = svc_inst.get("carol")
+        assert loan is not None
         assert loan["status"] == "closed"
 
     def test_unknown_borrower_returns_none(self) -> None:

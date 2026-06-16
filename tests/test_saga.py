@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import tempfile
+from typing import Any
 
 import pytest
 
 from underwrite.__exceptions__ import ProtocolError
 from underwrite.__saga__ import Saga, SagaOrchestrator, SagaStep
+from underwrite.__events__ import Event
 from underwrite.__store__ import FileStore, MemoryStore
 
 
@@ -47,10 +49,13 @@ class TestSagaOrchestrator:
         class FakeEmitter:
 
             def emit(self,
-                     et: str,
-                     payload: dict,
-                     correlation_id: str = "") -> None:
-                emitted.append((et, payload))
+                     event_type: str,
+                     payload: dict[str, Any],
+                     correlation_id: str = "") -> Event:
+                emitted.append((event_type, payload))
+                return Event(event_type=event_type,
+                             source="test",
+                             payload=payload)
 
         so.register_emitter("test", FakeEmitter())
         sid = so.start_saga(
@@ -76,13 +81,16 @@ class TestSagaOrchestrator:
                 self.fail = False
 
             def emit(self,
-                     et: str,
-                     payload: dict,
-                     correlation_id: str = "") -> None:
-                if et == "event.b":
+                     event_type: str,
+                     payload: dict[str, Any],
+                     correlation_id: str = "") -> Event:
+                if event_type == "event.b":
                     self.fail = True
                     raise RuntimeError("step b failed")
-                emitted.append((et, payload))
+                emitted.append((event_type, payload))
+                return Event(event_type=event_type,
+                             source="test",
+                             payload=payload)
 
         so.register_emitter("test", FakeEmitter())
         sid = so.start_saga(
@@ -107,14 +115,24 @@ class TestSagaOrchestrator:
         so = SagaOrchestrator()
         results: list = []
 
+        class FakeEmitter:
+
+            def emit(self,
+                     event_type: str,
+                     payload: dict[str, Any],
+                     correlation_id: str = "") -> Event:
+                return Event(event_type=event_type,
+                             source="test",
+                             payload=payload)
+
         def register_emitter(name: str) -> None:
-            so.register_emitter(name, "emitter")
+            so.register_emitter(name, FakeEmitter())
             results.append(name)
 
         import threading
 
-        t1 = threading.Thread(target=register_emitter, args=("saga-a",))
-        t2 = threading.Thread(target=register_emitter, args=("saga-b",))
+        t1 = threading.Thread(target=register_emitter, args=("saga-a", ))
+        t2 = threading.Thread(target=register_emitter, args=("saga-b", ))
         t1.start()
         t2.start()
         t1.join(timeout=1.0)
@@ -133,15 +151,18 @@ class TestSagaOrchestrator:
                 self.fail = False
 
             def emit(self,
-                     et: str,
-                     payload: dict,
-                     correlation_id: str = "") -> None:
-                if et == "event.b":
+                     event_type: str,
+                     payload: dict[str, Any],
+                     correlation_id: str = "") -> Event:
+                if event_type == "event.b":
                     self.fail = True
                     raise RuntimeError("step b failed")
-                if et.startswith("comp."):
-                    raise RuntimeError(f"compensation failed for {et}")
-                emitted.append((et, payload))
+                if event_type.startswith("comp."):
+                    raise RuntimeError(f"compensation failed for {event_type}")
+                emitted.append((event_type, payload))
+                return Event(event_type=event_type,
+                             source="test",
+                             payload=payload)
 
         so.register_emitter("test", FailingStepAndCompensateEmitter())
         sid = so.start_saga(
@@ -166,12 +187,15 @@ class TestSagaOrchestrator:
         class FailingEmitter:
 
             def emit(self,
-                     et: str,
-                     payload: dict,
-                     correlation_id: str = "") -> None:
-                if et == "event.fail":
+                     event_type: str,
+                     payload: dict[str, Any],
+                     correlation_id: str = "") -> Event:
+                if event_type == "event.fail":
                     raise RuntimeError("step failure detail")
-                emitted.append((et, payload))
+                emitted.append((event_type, payload))
+                return Event(event_type=event_type,
+                             source="test",
+                             payload=payload)
 
         so.register_emitter("test", FailingEmitter())
         sid = so.start_saga(
@@ -195,12 +219,15 @@ class TestSagaOrchestrator:
         class LockCheckEmitter:
 
             def emit(self,
-                     et: str,
-                     payload: dict,
-                     correlation_id: str = "") -> None:
-                if et == "event.b":
+                     event_type: str,
+                     payload: dict[str, Any],
+                     correlation_id: str = "") -> Event:
+                if event_type == "event.b":
                     raise RuntimeError("step b failed")
-                emitted.append((et, payload))
+                emitted.append((event_type, payload))
+                return Event(event_type=event_type,
+                             source="test",
+                             payload=payload)
 
         so.register_emitter("test", LockCheckEmitter())
         sid = so.start_saga(
@@ -258,10 +285,13 @@ class TestSagaPersistence:
         class FakeEmitter:
 
             def emit(self,
-                     et: str,
-                     payload: dict,
-                     correlation_id: str = "") -> None:
-                emitted.append((et, payload))
+                     event_type: str,
+                     payload: dict[str, Any],
+                     correlation_id: str = "") -> Event:
+                emitted.append((event_type, payload))
+                return Event(event_type=event_type,
+                             source="test",
+                             payload=payload)
 
         so.register_emitter("test", FakeEmitter())
         sid = so.start_saga(
@@ -283,11 +313,14 @@ class TestSagaPersistence:
         class FailingEmitter:
 
             def emit(self,
-                     et: str,
-                     payload: dict,
-                     correlation_id: str = "") -> None:
-                if et == "event.b":
+                     event_type: str,
+                     payload: dict[str, Any],
+                     correlation_id: str = "") -> Event:
+                if event_type == "event.b":
                     raise RuntimeError("step b failed")
+                return Event(event_type=event_type,
+                             source="test",
+                             payload=payload)
 
         so.register_emitter("test", FailingEmitter())
         sid = so.start_saga(
@@ -366,8 +399,10 @@ class TestSagaValidation:
         store.set(
             "saga:bad",
             {
-                "saga_id": "bad",
-                "name": "test",
+                "saga_id":
+                "bad",
+                "name":
+                "test",
                 "steps": [{
                     "name": "a",
                     "forward_event_type": "ev.a",
@@ -376,9 +411,12 @@ class TestSagaValidation:
                     "compensate_payload": {},
                 }],
                 "completed_steps": [99],
-                "status": "started",
-                "error": "",
-                "started_at": "2024-01-01T00:00:00",
+                "status":
+                "started",
+                "error":
+                "",
+                "started_at":
+                "2024-01-01T00:00:00",
             },
         )
         so = SagaOrchestrator(store=store)
@@ -394,9 +432,12 @@ class TestSagaFileStorePersistence:
 
             def emit(self,
                      event_type: str,
-                     payload: dict,
-                     correlation_id: str = "") -> None:
+                     payload: dict[str, Any],
+                     correlation_id: str = "") -> Event:
                 emitted.append((event_type, payload))
+                return Event(event_type=event_type,
+                             source="test",
+                             payload=payload)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileStore(data_dir=tmpdir)
@@ -420,7 +461,8 @@ class TestSagaFileStorePersistence:
             assert len(saga2.steps) == 1
             assert saga2.completed_steps == [0]
 
-    def test_incomplete_saga_loaded_and_replayable_with_filestore(self) -> None:
+    def test_incomplete_saga_loaded_and_replayable_with_filestore(
+            self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileStore(data_dir=tmpdir)
             emitted: list[tuple[str, dict]] = []
@@ -429,9 +471,12 @@ class TestSagaFileStorePersistence:
 
                 def emit(self,
                          event_type: str,
-                         payload: dict,
-                         correlation_id: str = "") -> None:
+                         payload: dict[str, Any],
+                         correlation_id: str = "") -> Event:
                     emitted.append((event_type, payload))
+                    return Event(event_type=event_type,
+                                 source="test",
+                                 payload=payload)
 
             so1 = SagaOrchestrator(store=store)
             sid = so1.start_saga(

@@ -498,6 +498,7 @@ class TestRevoke:
             "new_delegation": -10
         })
         state = svc.store.get("protocol:state")
+        assert state is not None
         assert state["delegation"]["bank->alice"] == 50_000
 
     def test_rejects_unknown_edge(self) -> None:
@@ -510,7 +511,8 @@ class TestRevoke:
             "new_delegation": 10
         })
         state = svc.store.get("protocol:state")
-        assert state is None or "bank->alice" not in state.get("delegation", {})
+        assert state is None or "bank->alice" not in state.get(
+            "delegation", {})
 
 
 class TestCreditLimit:
@@ -591,6 +593,7 @@ class TestStateSync:
             "delegation_amount": 50_000
         })
         state = svc.store.get("protocol:state")
+        assert state is not None
         assert "bank" in state["seeds"]
         assert state["parent"]["alice"] == "bank"
 
@@ -658,6 +661,7 @@ class TestEdgeCases:
             "new_delegation": 0
         })
         state = svc.store.get("protocol:state")
+        assert state is not None
         assert state["delegation"]["bank->a"] == 0
 
     def test_originate_uses_all_credit(self) -> None:

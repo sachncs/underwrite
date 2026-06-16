@@ -10,10 +10,10 @@ test:
 	python -m pytest tests/ -v --tb=short -q
 
 lint:
-	ruff check underwrite/
+	ruff check underwrite/ tests/
 
 typecheck:
-	mypy underwrite/
+	mypy underwrite/ tests/
 
 build:
 	python -m build

@@ -27,7 +27,7 @@ class TestRiskServiceFaults:
                     correlation_id: str = "") -> None:
             emitted.append((event_type, payload))
 
-        svc.emit = capture
+        svc.emit = capture  # type: ignore[assignment]
         event = Event(
             event_type=EventType.LOAN_ORIGINATED,
             source="test",
@@ -53,7 +53,7 @@ class TestRiskServiceFaults:
                     correlation_id: str = "") -> None:
             emitted.append((event_type, payload))
 
-        svc.emit = capture
+        svc.emit = capture  # type: ignore[assignment]
         event = Event(
             event_type=EventType.LOAN_ORIGINATED,
             source="test",

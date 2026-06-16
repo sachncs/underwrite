@@ -62,7 +62,8 @@ class TestFileStoreCorruption:
             with pytest.raises(StoreError):
                 store.get("key1")
         snapshot = metrics.snapshot()
-        assert any(k.startswith("store.io_error") for k in snapshot["counters"])
+        assert any(
+            k.startswith("store.io_error") for k in snapshot["counters"])
 
 
 class TestMemoryStore:
@@ -126,7 +127,10 @@ class MockStore(Store):
     def exists(self, key: str) -> bool:
         return key in self.data
 
-    def keys(self, pattern: str | None = None) -> list:
+    def keys(self,
+             pattern: str | None = None,
+             limit: int = 0,
+             offset: int = 0) -> list[str]:
         return list(self.data.keys())
 
 
@@ -144,7 +148,10 @@ class MockReadStore(ReadStore):
     def delete(self, key: str) -> bool:
         return self.data.pop(key, None) is not None
 
-    def keys(self, pattern: str | None = None) -> list:
+    def keys(self,
+             pattern: str | None = None,
+             limit: int = 0,
+             offset: int = 0) -> list[str]:
         return list(self.data.keys())
 
 

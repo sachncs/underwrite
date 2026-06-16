@@ -17,6 +17,9 @@ Parsed by `Configuration.__apply_env_overrides()` in
 | `UNDERWRITE_BUS_RATE_LIMIT` | No | `0` | Max events/second per subscriber (`0` = unlimited) |
 | `UNDERWRITE_BUS_MAX_WORKERS` | No | `0` | Thread pool size (`0` = synchronous dispatch) |
 | `UNDERWRITE_BUS_MAX_FUTURES` | No | `10000` | Max pending futures before backpressure |
+| `UNDERWRITE_SQS_QUEUE_URL` | No | `""` | AWS SQS queue URL (required when `BUS_BACKEND=sqs`) |
+| `UNDERWRITE_SQS_REGION` | No | `""` | AWS region for SQS |
+| `UNDERWRITE_MODAL_QUEUE_NAME` | No | `""` | Modal queue name (required when `BUS_BACKEND=modal`) |
 | `UNDERWRITE_STORE_BACKEND` | No | `memory` | Store backend (`memory`, `filesystem`, `postgres`) |
 | `UNDERWRITE_STORE_DSN` | No | `""` | Store connection string |
 | `UNDERWRITE_STORE_POOL_SIZE` | No | `5` | Database connection pool size |
@@ -79,6 +82,79 @@ Parsed by `Configuration.__apply_env_overrides()` in
 |----------|----------|---------|-------------|
 | `VAULT_TOKEN` | No | `""` | Vault token (alternative to `UNDERWRITE_SECRETS_VAULT_TOKEN`) |
 | `UNDERWRITE_SECRET_<NAME>` | No | — | Read secrets from environment; key is uppercased with `/` and `-` replaced by `_` |
+
+---
+
+## RBI Pricing Caps (India)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `UNDERWRITE_PERSONAL_LOAN_RATE_CAP` | No | `0.28` | Max all-in-cost rate for personal loans (28% p.a. per RBI) |
+| `UNDERWRITE_MICRO_LOAN_RATE_CAP` | No | `0.30` | Max all-in-cost rate for micro loans under ₹50K (30% p.a. per RBI) |
+| `UNDERWRITE_PENAL_INTEREST_CAP` | No | `0.24` | Max penal interest rate (24% p.a. per RBI DLG) |
+| `UNDERWRITE_COOLING_OFF_DAYS` | No | `3` | Cooling-off / free-look period for loan cancellation (RBI DLG) |
+| `UNDERWRITE_FORECLOSURE_CHARGE_PERSONAL` | No | `0.00` | Foreclosure charge for personal loans (0% per RBI) |
+| `UNDERWRITE_FORECLOSURE_CHARGE_HOME` | No | `0.00` | Foreclosure charge for home loans (0% per RBI NHB) |
+
+---
+
+## AML / KYC (India)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `AML_BLOCKLIST_PATH` | No | `""` | Path to JSON blocklist for AML screening (PEPs, sanctions, etc.) |
+| `AML_THRESHOLD_LOW` | No | `10` | Score threshold for low-risk AML clearance |
+| `AML_THRESHOLD_FROZEN` | No | `7` | Score threshold above which borrower is frozen |
+
+---
+
+## Credit Bureau / CKYC (India)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `UNDERWRITE_CREDIT_BUREAU_CIBIL_ENABLED` | No | `true` | Enable CIBIL credit report check |
+| `UNDERWRITE_CREDIT_BUREAU_CIBIL_API_KEY` | No | `""` | CIBIL API key |
+| `UNDERWRITE_CREDIT_BUREAU_CIBIL_API_BASE` | No | `https://api.cibil.com/v1` | CIBIL API base URL |
+| `UNDERWRITE_CREDIT_BUREAU_EXPERIAN_ENABLED` | No | `false` | Enable Experian credit report check |
+| `UNDERWRITE_CREDIT_BUREAU_EQUIFAX_ENABLED` | No | `false` | Enable Equifax credit report check |
+| `UNDERWRITE_CREDIT_BUREAU_CKYC_ENABLED` | No | `true` | Enable CKYC identity verification |
+| `UNDERWRITE_CREDIT_BUREAU_CKYC_API_KEY` | No | `""` | CKYC registry API key |
+| `UNDERWRITE_CREDIT_BUREAU_CKYC_API_BASE` | No | `https://api.ckycindia.in/v1` | CKYC API base URL |
+
+---
+
+## Razorpay Payment Gateway (India)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `UNDERWRITE_RAZORPAY_KEY_ID` | No | `""` | Razorpay API key ID |
+| `UNDERWRITE_RAZORPAY_KEY_SECRET` | No | `""` | Razorpay API key secret |
+| `UNDERWRITE_RAZORPAY_WEBHOOK_SECRET` | No | `""` | Razorpay webhook signing secret |
+| `UNDERWRITE_RAZORPAY_API_BASE_URL` | No | `https://api.razorpay.com/v1` | Razorpay API base URL |
+
+---
+
+## DPDPA 2023 Compliance (India)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `UNDERWRITE_DPDPA_DATA_RETENTION_YEARS` | No | `8` | Borrower data retention period per IT Act/DPDPA |
+| `UNDERWRITE_DPDPA_KYC_RETENTION_YEARS` | No | `5` | KYC data retention period per PMLA rules |
+| `UNDERWRITE_DPDPA_BREACH_NOTIFICATION_HOURS` | No | `72` | Breach notification window to Data Protection Board |
+| `UNDERWRITE_DPDPA_CONSENT_VALIDITY_DAYS` | No | `365` | Consent validity period for data processing |
+| `UNDERWRITE_DPDPA_DSR_RESPONSE_DAYS` | No | `30` | Data Subject Request fulfillment timeline |
+| `UNDERWRITE_DPDPA_DSR_GRIEVANCE_RESPONSE_DAYS` | No | `15` | Grievance response timeline |
+| `UNDERWRITE_DPDPA_DPO_EMAIL` | No | `""` | Data Protection Officer email |
+| `UNDERWRITE_DPDPA_DPO_PHONE` | No | `""` | Data Protection Officer phone |
+
+---
+
+## KFS (Key Fact Statement — India)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `UNDERWRITE_KFS_COOLING_OFF_DAYS` | No | `3` | Free-look period after KFS issuance per RBI DLG |
+| `UNDERWRITE_KFS_DISCLOSURE_VERSION` | No | `1.0` | KFS template version |
 
 ---
 
