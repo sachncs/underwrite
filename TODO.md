@@ -29,12 +29,10 @@ Based on comprehensive codebase analysis (June 2026). Covers unimplemented backe
 
 ### Bus Backends (v1.0.0 must-have)
 
-- [ ] **SQS Event Bus Backend** — `SQSBackend(EventBus)` for distributed deployment via Amazon SQS
-  - References: `__config__.py:69`, `docs/ROADMAP.md:69`, `docs/DESIGN_DECISIONS.md:117`
-  - Config value `sqs` accepted but only `LocalBus` exists
-- [ ] **Modal Event Bus Backend** — `ModalBackend(EventBus)` for Modal.com serverless queues
-  - References: `__config__.py:69`, `docs/ROADMAP.md:69`
-  - Same pattern — accepted in config, zero code exists
+- [x] **SQS Event Bus Backend** — `SqsBus(EventBus)` for distributed deployment via Amazon SQS (# importlib lazy import of boto3)
+  - File: `underwrite/__bus_sqs__.py` (162 lines)
+- [x] **Modal Event Bus Backend** — `ModalBus(EventBus)` for Modal.com serverless queues (# importlib lazy import of modal)
+  - File: `underwrite/__bus_modal__.py` (138 lines)
 
 ### Infrastructure (v1.0.0 must-have)
 
@@ -85,8 +83,8 @@ Based on comprehensive codebase analysis (June 2026). Covers unimplemented backe
   - File: `underwrite/__service_registry__.py`
 - [ ] **`DelegationGraph` Direct Unit Tests** — 273-line graph engine (`graph.py`) tested only indirectly through `MechanismService`
   - File: `underwrite/services/mechanism/graph.py`
-- [ ] **`TestMechanismConcurrency` Placeholder** — Entire class body is `pass`, skipped with `@pytest.mark.skip`
-  - File: `tests/test_concurrency_faults.py:308-310`
+- [x] **`TestMechanismConcurrency` Concurrency Tests** — 3 stress tests replaced the skipped placeholder: concurrent user addition, mixed operations, and read-only quotes
+  - File: `tests/test_concurrency_faults.py`
 
 ### Code Quality
 
@@ -128,7 +126,7 @@ Based on comprehensive codebase analysis (June 2026). Covers unimplemented backe
 
 | Priority | Items | Category |
 |----------|-------|----------|
-| 🔴 High | 12 | Bus backends (SQS/Modal), saga persistence, DLQ replay, distributed rate limiting, real recovery service, Prometheus path, correlation IDs, OTLP auto-instr + 4 critical bugs |
-| 🟡 Medium | 12 | Fee schedules, plugin models, schema versioning, async bus, secrets set() + 5 missing test areas + 3 code quality |
-| 🟢 Low | 7 | PyPI CI, mutation testing, pagination, compose, twilio dep + 2 cleanup |
-| **Total** | **31** | |
+| 🔴 High | 10 | Saga persistence, DLQ replay, distributed rate limiting, real recovery service, Prometheus path, correlation IDs, OTLP auto-instr + 3 infrastructure |
+| 🟡 Medium | 11 | Fee schedules, plugin models, schema versioning, async bus + 5 missing test areas + 2 code quality |
+| 🟢 Low | 7 | PyPI CI, mutation testing, pagination, compose + 3 cleanup |
+| **Total** | **28** | |
