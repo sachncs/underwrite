@@ -122,6 +122,7 @@ underwrite = ["py.typed"]
 
 [tool.ruff]
 line-length = 120
+exclude = ["underwrite/__version__.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
