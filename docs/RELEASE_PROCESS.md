@@ -114,8 +114,8 @@ Requires PyPI credentials with push access to the `underwrite` project.
 
 ```bash
 docker build -t underwrite:0.1.0 -t underwrite:latest .
-docker tag underwrite:0.1.0 ghcr.io/sachn-cs/underwrite:0.1.0
-docker push ghcr.io/sachn-cs/underwrite:0.1.0
+docker tag underwrite:0.1.0 ghcr.io/sachncs/underwrite:0.1.0
+docker push ghcr.io/sachncs/underwrite:0.1.0
 ```
 
 The `Dockerfile` uses a multi-stage build (builder → slim runtime) with Python 3.12.

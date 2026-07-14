@@ -85,9 +85,9 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/sachn-cs/unsecured-lending-underwriting"
-Repository = "https://github.com/sachn-cs/unsecured-lending-underwriting"
-Issues = "https://github.com/sachn-cs/unsecured-lending-underwriting/issues"
+Homepage = "https://github.com/sachncs/underwrite"
+Repository = "https://github.com/sachncs/underwrite"
+Issues = "https://github.com/sachncs/underwrite/issues"
 
 [project.scripts]
 underwrite = "underwrite.__cli__:main"

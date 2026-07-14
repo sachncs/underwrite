@@ -112,11 +112,11 @@ Link to issues, commits, or pull requests where helpful:
 
 ```markdown
 ### Fixed
-- Path traversal bypass in `FileStore.__path` — see [#42](https://github.com/sachn-cs/underwrite/issues/42)
+- Path traversal bypass in `FileStore.__path` — see [#42](https://github.com/sachncs/underwrite/issues/42)
 - NaN/Inf propagation in `FeeService` — fixed in `a1b2c3d`
 ```
 
-Repository URLs use: `https://github.com/sachn-cs/underwrite`
+Repository URLs use: `https://github.com/sachncs/underwrite`
 
 ## Example (from existing CHANGELOG.md)
 

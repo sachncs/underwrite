@@ -1,6 +1,6 @@
 # underwrite — Indian Lending Platform (Beta)
 
-[![CI](https://github.com/sachn-cs/underwrite/actions/workflows/ci.yml/badge.svg)](https://github.com/sachn-cs/underwrite/actions/workflows/ci.yml)
+[![CI](https://github.com/sachncs/underwrite/actions/workflows/ci.yml/badge.svg)](https://github.com/sachncs/underwrite/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12%20|%203.13-blue)](https://pypi.org/project/underwrite/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
@@ -34,7 +34,7 @@ If you need a production-grade Indian lending platform today, underwrite is not 
 ## Quick Start
 
 ```bash
-git clone https://github.com/sachn-cs/underwrite.git
+git clone https://github.com/sachncs/underwrite.git
 cd underwrite
 ./setup.sh
 source .venv/bin/activate
