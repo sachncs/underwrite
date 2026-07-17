@@ -12,6 +12,7 @@ __all__ = [
 ]
 
 import asyncio
+import inspect
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -32,6 +33,9 @@ class AsyncLocalBus(AsyncEventBus):
 
     Each handler has a per-execution timeout (*HANDLER_TIMEOUT*) to
     prevent a single slow handler from blocking the dispatch group.
+    The dispatch loop blocks on the queue with an ``asyncio.Event``
+    for shutdown signalling, so it does not waste CPU on a
+    timeout-based wakeup.
     """
 
     def __init__(
@@ -46,6 +50,7 @@ class AsyncLocalBus(AsyncEventBus):
         self.__subscription_lock: asyncio.Lock = asyncio.Lock()
         self.__task: asyncio.Task[None] | None = None
         self.__running: bool = False
+        self.__stop_event: asyncio.Event = asyncio.Event()
         self.__semaphore: asyncio.Semaphore | None = asyncio.Semaphore(max_workers) if max_workers > 0 else None
         self.__dlq: DeadLetterQueue = DeadLetterQueue(store=store)
         self.__idempotency: IdempotencyGuard = IdempotencyGuard()
@@ -58,15 +63,20 @@ class AsyncLocalBus(AsyncEventBus):
     def idempotency(self) -> IdempotencyGuard:
         return self.__idempotency
 
+    def is_stopped(self) -> bool:
+        return not self.__running
+
     async def start(self) -> None:
         if self.__running:
             return
         self.__running = True
+        self.__stop_event.clear()
         self.__task = asyncio.create_task(self.__dispatch_loop())
         logger.info("AsyncLocalBus started")
 
     async def stop(self) -> None:
         self.__running = False
+        self.__stop_event.set()
         # Drain any remaining events from the queue
         drained = 0
         while not self.__queue.empty():
@@ -107,15 +117,22 @@ class AsyncLocalBus(AsyncEventBus):
 
     async def __dispatch_loop(self) -> None:
         while self.__running:
+            getter = asyncio.create_task(self.__queue.get())
+            stopper = asyncio.create_task(self.__stop_event.wait())
             try:
-                event = await asyncio.wait_for(self.__queue.get(), timeout=1.0)
-            except asyncio.TimeoutError:
-                continue
+                done, pending = await asyncio.wait(
+                    {getter, stopper}, return_when=asyncio.FIRST_COMPLETED
+                )
             except asyncio.CancelledError:
+                getter.cancel()
+                stopper.cancel()
+                raise
+            for p in pending:
+                p.cancel()
+            if stopper in done:
+                getter.cancel()
                 break
-            except Exception:
-                logger.exception("dispatch loop: unexpected error dequeuing event")
-                continue
+            event: Event = getter.result()
             try:
                 await self.__dispatch(event)
             except asyncio.CancelledError:
@@ -130,7 +147,6 @@ class AsyncLocalBus(AsyncEventBus):
         handlers = handlers + wild_handlers
         if not handlers:
             return
-        coros = [self.__safe_dispatch(h, event) for h in handlers]
         if self.__semaphore is not None:
 
             async def __bounded(h, e):
@@ -138,10 +154,20 @@ class AsyncLocalBus(AsyncEventBus):
                     await self.__safe_dispatch(h, e)
 
             coros = [__bounded(h, event) for h in handlers]
-        results = await asyncio.wait_for(
-            asyncio.gather(*coros, return_exceptions=True),
-            timeout=HANDLER_TIMEOUT * 2,
-        )
+        else:
+            coros = [self.__safe_dispatch(h, event) for h in handlers]
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*coros, return_exceptions=True),
+                timeout=HANDLER_TIMEOUT * 2,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "aggregate dispatch timeout after %.1fs for event %s; cancelling pending handlers",
+                HANDLER_TIMEOUT * 2,
+                event.event_id,
+            )
+            return
         for handler, result in zip(handlers, results, strict=False):
             if isinstance(result, Exception):
                 logger.warning("async handler %s failed: %s", getattr(handler, "__name__", str(handler)), result)
@@ -149,8 +175,8 @@ class AsyncLocalBus(AsyncEventBus):
     async def __safe_dispatch(self, handler: Callable[[Event], Any], event: Event) -> None:
         try:
             result = handler(event)
-            if result is not None and hasattr(result, "__await__"):
-                result = await asyncio.wait_for(result, timeout=HANDLER_TIMEOUT)
+            if inspect.isawaitable(result):
+                await asyncio.wait_for(result, timeout=HANDLER_TIMEOUT)
         except asyncio.TimeoutError:
             msg = f"handler timed out after {HANDLER_TIMEOUT}s"
             logger.warning("async handler timed out for %s: %s", event.event_id, handler.__name__)

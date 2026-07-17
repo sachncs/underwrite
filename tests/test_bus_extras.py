@@ -67,6 +67,24 @@ class TestDeadLetterQueue:
         assert remaining == ["e2", "e3", "e4"]
 
 
+class TestAsyncLocalBusShutdown:
+    def test_stop_event_wakes_dispatch_loop(self) -> None:
+        """Stopping the bus must wake the dispatch loop immediately,
+        not after a 1-second timeout-based wakeup."""
+        import asyncio
+
+        from underwrite.__async_bus__ import AsyncLocalBus
+
+        async def run() -> None:
+            bus = AsyncLocalBus()
+            await bus.start()
+            await asyncio.sleep(0.05)
+            await bus.stop()
+            assert bus.is_stopped() is True
+
+        asyncio.run(run())
+
+
 class TestDistributedRateLimiterTTL:
     def test_expired_window_is_recycled(self) -> None:
         """A window whose end has passed must allow the next event

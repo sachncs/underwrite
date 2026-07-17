@@ -323,6 +323,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   files; one had drifted out of sync. `SERVICE_NAMES` is now
   derived from the registry's `SERVICE_CLASSES` keys, which is
   the single source of truth.
+- **AsyncBus dispatch loop woke every 1s when idle** — the loop
+  used `asyncio.wait_for(queue.get(), timeout=1.0)` which forced
+  a wasted wakeup on every idle tick. Switch to
+  `asyncio.wait({getter, stop_event})` so shutdown is
+  immediate. Use `inspect.isawaitable` instead of duck-typing
+  `hasattr(result, '__await__')` for the awaitable detection.
+- **SqsBus deleted the message after the inner `try`/`except`
+  regardless of whether dispatch succeeded** — if a handler
+  raised, the message was deleted from SQS, losing the event
+  forever. Reorder so the message is only deleted on full
+  success; failed dispatches stay in flight and are redelivered
+  by SQS after the visibility timeout, with the
+  `IdempotencyGuard` absorbing any duplicate.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

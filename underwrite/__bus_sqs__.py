@@ -130,20 +130,76 @@ class SqsBus(EventBus):
                 for msg in messages:
                     if not self.__running:
                         break
-                    try:
-                        data: dict[str, Any] = json.loads(msg["Body"])
-                        event: Event = Event.from_dict(data)
-                        self.__dispatch(event)
-                        self._client.delete_message(
-                            QueueUrl=self.__queue_url,
-                            ReceiptHandle=msg["ReceiptHandle"],
-                        )
-                    except Exception:
-                        logger.exception("failed to process SQS message %s", msg.get("MessageId", "?"))
+                    self.__handle_message(msg)
             except Exception:
                 if self.__running:
                     logger.exception("SQS poll error")
                     time.sleep(1)
+
+    def __handle_message(self, msg: dict[str, Any]) -> None:
+        """Process a single SQS message: dedupe, dispatch, then
+        delete on success. On dispatch failure the message is left
+        in flight — SQS VisibilityTimeout will redeliver it after
+        the timeout, and the IdempotencyGuard prevents duplicate
+        processing."""
+        receipt: str = msg.get("ReceiptHandle", "")
+        body: str = msg.get("Body", "")
+        if not receipt or not body:
+            logger.warning("SQS message missing receipt or body, deleting")
+            try:
+                self._client.delete_message(QueueUrl=self.__queue_url, ReceiptHandle=receipt)
+            except Exception:
+                logger.exception("failed to delete malformed SQS message")
+            return
+        try:
+            data = json.loads(body)
+            event = Event.from_dict(data)
+        except Exception:
+            logger.exception("SQS message body failed to parse, deleting")
+            try:
+                self._client.delete_message(QueueUrl=self.__queue_url, ReceiptHandle=receipt)
+            except Exception:
+                logger.exception("failed to delete unparseable SQS message")
+            return
+
+        # Run the dispatch through the same guard / circuit-breaker
+        # / DLQ path as the local bus, so the two backends behave
+        # consistently. The IdempotencyGuard makes at-least-once
+        # SQS delivery safe.
+        with self.__lock:
+            wildcards: list[tuple[str, Callable[[Event], None]]] = self.__handlers.get("*", [])
+            specific: list[tuple[str, Callable[[Event], None]]] = self.__handlers.get(event.event_type, [])
+        all_handlers = wildcards + specific
+        any_failure = False
+        for sid, handler in all_handlers:
+            if not self.__circuit_breaker.allow_request(sid):
+                logger.warning("circuit open for subscriber %s, sending %s to DLQ", sid, event.event_type)
+                self.__dlq.put(event, "circuit_open", sid)
+                continue
+            if self.__idempotency.is_duplicate(sid, event.event_id):
+                continue
+            try:
+                handler(event)
+                self.__circuit_breaker.record_success(sid)
+            except Exception as exc:
+                any_failure = True
+                logger.exception("handler failed for %s", event.event_type)
+                self.__dlq.put(event, f"{type(exc).__name__}: {exc}", sid)
+                self.__circuit_breaker.record_failure(sid)
+
+        # Only delete on full success. If any handler failed the
+        # message stays in flight; SQS will redeliver it after the
+        # visibility timeout and the idempotency guard prevents
+        # duplicate side effects.
+        if any_failure:
+            return
+        try:
+            self._client.delete_message(QueueUrl=self.__queue_url, ReceiptHandle=receipt)
+        except Exception:
+            logger.exception(
+                "failed to delete SQS message after successful dispatch — "
+                "message will be redelivered (idempotency guard absorbs the duplicate)"
+            )
 
     def __dispatch(self, event: Event) -> None:
         with self.__lock:
