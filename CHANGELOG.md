@@ -181,6 +181,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   stale cleared data still got the same outcome as a never-frozen
   user. Replace with ``aml_status != "frozen"`` so the most
   recent AML state actually gates the decision.
+- **Quote and mechanism emitted `protocol_premium` without a
+  consistent unit interpretation** — the value was
+  `pr * principal * term` (total interest over the term in
+  currency units) but the field name implied a one-time fee.
+  Both `mechanism` and `quote` now also emit `total_interest` with
+  the same value, and a docstring clarifies the units. Downstream
+  consumers should migrate to `total_interest`; `protocol_premium`
+  is kept for backwards compatibility.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

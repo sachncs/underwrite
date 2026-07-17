@@ -190,8 +190,9 @@ class MechanismService(NanoService):
         with self.state_lock:
             snap = self.__graph.snapshot()
             self.__graph.originate(borrower, principal, term, dp, pr, mdr)
-        protocol_premium = pr * principal * term
-        p["protocol_premium"] = protocol_premium
+        total_interest = pr * principal * term
+        p["protocol_premium"] = total_interest
+        p["total_interest"] = total_interest
         self.__persist_or_rollback(snap)
         self.emit(EventType.LOAN_ORIGINATED, p, correlation_id=event.correlation_id)
 
@@ -236,7 +237,7 @@ class MechanismService(NanoService):
         clamped_term: float = max(term, EPSILON)
         one_minus_dp: float = max(1.0 - clamped_dp, EPSILON)
         break_even: float = min(clamped_dp / (one_minus_dp * clamped_term), 1e6)
-        protocol_premium: float = pr * principal * term
+        total_interest: float = pr * principal * term
         self.emit(
             EventType.QUOTE_CALCULATED,
             {
@@ -245,7 +246,8 @@ class MechanismService(NanoService):
                 "term": term,
                 "default_probability": dp,
                 "protocol_rate": pr,
-                "protocol_premium": protocol_premium,
+                "protocol_premium": total_interest,
+                "total_interest": total_interest,
                 "break_even_rate": break_even,
             },
             correlation_id=event.correlation_id,

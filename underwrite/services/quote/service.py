@@ -28,7 +28,13 @@ class QuoteService(NanoService):
         mdr: float = get_finite(p, "max_delegation_rate", 0.05)
         borrower: str = p.get("borrower", "")
 
-        protocol_premium: float = pr * principal * term
+        # protocol_premium is the total protocol interest that would be
+        # paid over the full term: per-period rate * principal * number
+        # of periods. The field name is kept for backwards compatibility
+        # with downstream services; the value is *total interest in
+        # currency units*, not a per-period rate.  Use a more descriptive
+        # alias in the emitted payload.
+        total_interest: float = pr * principal * term
         break_even: float = 0.0
         if 0.0 < dp < 1.0 and term > 0:
             break_even = min(
@@ -45,9 +51,9 @@ class QuoteService(NanoService):
                 "default_probability": dp,
                 "protocol_rate": pr,
                 "max_delegation_rate": mdr,
-                "protocol_premium": protocol_premium,
+                "protocol_premium": total_interest,
                 "break_even_rate": break_even,
-                "total_interest": protocol_premium,
+                "total_interest": total_interest,
             },
             correlation_id=event.correlation_id,
         )
