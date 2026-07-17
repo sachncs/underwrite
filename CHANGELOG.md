@@ -345,6 +345,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the endpoint is open (documented as acceptable for a private
   scrape network). Regression tests cover 200/401/wrong-bearer
   /no-token paths.
+- **JSON log formatter had the same over-match bug as the
+  audit PII redactor** — the formatter's `s in k.lower()` check
+  matched `pan` against `company`, `tax` against `taxonomy`,
+  etc. Switch to token-based matching that splits the key on
+  non-alphanumeric boundaries and tests each token for set
+  membership. New regression tests cover both directions.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

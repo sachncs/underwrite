@@ -137,22 +137,30 @@ class Runtime:
                     "authorization",
                     "private_key",
                     "ssn",
-                    "tax_id",
+                    "tax",
                     "pin",
                     "cvv",
                     "pan",
-                    "account_number",
-                    "routing_number",
+                    "account",
+                    "routing",
                 }
             )
+
+            def _tokens(s: str) -> set[str]:
+                import re as _re
+
+                return set(_re.findall(r"[a-z0-9]+", s.lower()))
 
             class JsonFormatter(logging_mod.Formatter):
                 def __redact(self, data: object) -> object:
                     if isinstance(data, dict):
-                        return {
-                            k: "***REDACTED***" if any(s in k.lower() for s in sensitive_fields) else self.__redact(v)
-                            for k, v in data.items()
-                        }
+                        out: dict[object, object] = {}
+                        for k, v in data.items():
+                            if isinstance(k, str) and _tokens(k) & sensitive_fields:
+                                out[k] = "***REDACTED***"
+                            else:
+                                out[k] = self.__redact(v)
+                        return out
                     if isinstance(data, (list, tuple)):
                         return [self.__redact(i) for i in data]
                     return data
