@@ -253,6 +253,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and recycles expired windows. Works on MemoryStore, FileStore,
   and any Postgres backend without requiring server-side TTL
   support.
+- **Configuration save leaked payment provider / bureau / identity
+  secrets to disk** — `Configuration.to_dict` only redacted
+  `secrets.token`, `identity.private_key`, and
+  `identity.encryption_passphrase`. Razorpay `key_secret`,
+  `webhook_secret`, `api_token`, every credit-bureau API key,
+  and CKYC API key were persisted in plaintext on `config.save()`.
+  The redaction list now covers every secret-shaped field across
+  every config section.
+- **Env-var overrides silently disabled features on parse error**
+  — `UNDERWRITE_AUTHZ_ENABLED=garbage` was treated as False with
+  only a debug log. The parser now logs a warning and leaves the
+  default in place, never silently disabling a feature.
+- **`Configuration.data_dir` accepted any path** — a config with
+  `data_dir=/etc` would have the FileStore read/write system
+  paths. Add a Pydantic field validator that rejects sensitive
+  system paths (/, /etc, /proc, /sys, /var, /usr).
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

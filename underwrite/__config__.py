@@ -387,7 +387,25 @@ class Configuration(ForbidExtra):
     tracing: TracingConfig = Field(default_factory=TracingConfig)
     saga: SagaConfig = Field(default_factory=SagaConfig)
     services: dict[str, ServiceConfig] = Field(default_factory=dict)
-    data_dir: str = "./data"
+    data_dir: str = Field(default="./data")
+
+    @field_validator("data_dir")
+    @classmethod
+    def _validate_data_dir(cls, v: str) -> str:
+        if not v or "\x00" in v:
+            raise ValueError(f"invalid data_dir: {v!r}")
+        from pathlib import Path
+
+        path = Path(v)
+        # Reject obvious foot-guns: /etc, /, /proc, /sys. The path
+        # is still used to read/write files so the operator must
+        # explicitly opt in to such locations.
+        parts = path.parts
+        if parts and parts[0] == "/":
+            dangerous = {"/", "/etc", "/proc", "/sys", "/var", "/usr"}
+            if str(path) in dangerous or str(path).startswith(tuple(p + "/" for p in dangerous)):
+                raise ValueError(f"data_dir {v!r} points at a sensitive system path")
+        return v
     secrets: SecretsConfig = Field(default_factory=SecretsConfig)
     recovery: RecoveryConfig = Field(default_factory=RecoveryConfig)
     fee: FeeConfig = Field(default_factory=FeeConfig)
@@ -450,13 +468,34 @@ class Configuration(ForbidExtra):
 
     def to_dict(self) -> dict[str, Any]:
         d = self.model_dump(exclude_none=True)
-        if "secrets" in d:
+        # Redact every secret-shaped field so config.save() never
+        # writes payment provider keys, webhook secrets, credit-
+        # bureau API keys, or the runtime identity private key to
+        # disk. The original ``secrets.token`` removal and the
+        # identity-private-key stripping remain for backwards
+        # compatibility; the explicit field list below covers
+        # every documented secret.
+        secret_fields: tuple[str, ...] = (
+            "key_secret",
+            "webhook_secret",
+            "api_token",
+            "api_base_url",
+            "token",
+            "private_key",
+            "encryption_passphrase",
+            "cibil_api_key",
+            "experian_api_key",
+            "equifax_api_key",
+            "ckyc_api_key",
+        )
+        for section in d.values():
+            if isinstance(section, dict):
+                for f in secret_fields:
+                    section.pop(f, None)
+        if "secrets" in d and isinstance(d["secrets"], dict):
             d["secrets"].pop("token", None)
             if not d["secrets"]:
                 d.pop("secrets")
-        if "identity" in d:
-            d["identity"].pop("private_key", None)
-            d["identity"].pop("encryption_passphrase", None)
         return d
 
     def enabled_services(self) -> list[str]:
@@ -600,14 +639,24 @@ class Configuration(ForbidExtra):
             val = os.environ.get(env_var)
             if val is None:
                 continue
-            try:
-                if typ is bool:
-                    coerced = val.lower() in ("1", "true", "yes")
-                else:
+            if typ is bool:
+                if val.lower() not in ("1", "true", "yes", "0", "false", "no", "on", "off"):
+                    logger.warning(
+                        "could not parse %s=%r as bool, leaving default in place", env_var, val
+                    )
+                    continue
+                coerced = val.lower() in ("1", "true", "yes", "on")
+            else:
+                try:
                     coerced = typ(val)
-            except (ValueError, TypeError):
-                logger.warning("failed to coerce %s=%r to %s, skipping", env_var, val, typ.__name__)
-                continue
+                except (ValueError, TypeError):
+                    logger.warning(
+                        "could not parse %s=%r as %s, leaving default in place",
+                        env_var,
+                        val,
+                        typ.__name__,
+                    )
+                    continue
             if field_attr is None:
                 setattr(config, section_attr, coerced)
             else:
