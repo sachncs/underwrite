@@ -503,7 +503,19 @@ class Configuration(ForbidExtra):
 
     @classmethod
     def __merge(cls, config: Configuration, data: dict[str, Any]) -> Configuration:
+        """Overlay *data* on a deep copy of *config* and return a new
+        ``Configuration``.
+
+        Each top-level section is rebuilt with Pydantic's
+        ``model_construct`` on the section's ``model_dump()`` dict
+        merged with the corresponding input dict. Unknown fields
+        raise ``ConfigurationError``; validation errors are
+        re-raised as ``ConfigurationError`` with a section-prefixed
+        message.
+        """
         import copy
+
+        from pydantic import ValidationError
 
         config = copy.deepcopy(config)
         known_keys = {
@@ -534,61 +546,97 @@ class Configuration(ForbidExtra):
         if unknown:
             raise ConfigurationError(f"unknown config keys: {', '.join(sorted(unknown))}")
 
-        def merge_sub(model_cls, section, cfg, data_map):
-            unknown = set(data_map) - set(model_cls.model_fields)
-            if unknown:
-                raise ConfigurationError(f"{section}: unknown field(s): {', '.join(sorted(unknown))}")
-            from pydantic import ValidationError
-
-            merged = cfg.model_copy(update={k: v for k, v in data_map.items() if k in model_cls.model_fields})
+        def overlay_section(
+            model_cls: type[BaseModel],
+            section_name: str,
+            current: BaseModel,
+            new_data: dict[str, Any],
+        ) -> BaseModel:
+            unknown_fields = set(new_data) - set(model_cls.model_fields)
+            if unknown_fields:
+                raise ConfigurationError(
+                    f"{section_name}: unknown field(s): {', '.join(sorted(unknown_fields))}"
+                )
+            merged: dict[str, Any] = {**current.model_dump(), **new_data}
             try:
-                return model_cls(**merged.model_dump())
+                return model_cls.model_validate(merged)
             except ValidationError as exc:
-                msg = "; ".join(f"{section}.{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}" for e in exc.errors())
+                msg = "; ".join(
+                    f"{section_name}.{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"
+                    for e in exc.errors()
+                )
                 raise ConfigurationError(msg) from exc
 
-        if "bus" in data:
-            config.bus = merge_sub(BusConfig, "bus", config.bus, data["bus"])
-        if "store" in data:
-            config.store = merge_sub(StoreConfig, "store", config.store, data["store"])
-        if "logging" in data:
-            overrides = dict(data["logging"])
-            if "format" in overrides and "log_format" not in overrides:
-                overrides["log_format"] = overrides.pop("format")
-            config.logging = merge_sub(LoggingConfig, "logging", config.logging, overrides)
-        if "identity" in data:
-            config.identity = merge_sub(IdentityConfig, "identity", config.identity, data["identity"])
-        if "authz" in data:
-            config.authz = merge_sub(AuthzConfig, "authz", config.authz, data["authz"])
-        if "metrics" in data:
-            config.metrics = merge_sub(MetricsConfig, "metrics", config.metrics, data["metrics"])
-        if "migration" in data:
-            config.migration = merge_sub(MigrationConfig, "migration", config.migration, data["migration"])
-        if "tracing" in data:
-            config.tracing = merge_sub(TracingConfig, "tracing", config.tracing, data["tracing"])
-        if "saga" in data:
-            config.saga = merge_sub(SagaConfig, "saga", config.saga, data["saga"])
-        if "secrets" in data:
-            config.secrets = merge_sub(SecretsConfig, "secrets", config.secrets, data["secrets"])
-        if "recovery" in data:
-            config.recovery = merge_sub(RecoveryConfig, "recovery", config.recovery, data["recovery"])
+        section_overlays: dict[str, tuple[type[BaseModel], str]] = {
+            "bus": (BusConfig, "bus"),
+            "store": (StoreConfig, "store"),
+            "logging": (LoggingConfig, "logging"),
+            "identity": (IdentityConfig, "identity"),
+            "authz": (AuthzConfig, "authz"),
+            "metrics": (MetricsConfig, "metrics"),
+            "migration": (MigrationConfig, "migration"),
+            "tracing": (TracingConfig, "tracing"),
+            "saga": (SagaConfig, "saga"),
+            "secrets": (SecretsConfig, "secrets"),
+            "recovery": (RecoveryConfig, "recovery"),
+            "audit": (AuditConfig, "audit"),
+        }
+        for section_name, (model_cls, attr) in section_overlays.items():
+            if section_name in data:
+                new_section = dict(data[section_name])
+                # Backwards-compat alias: ``logging.format`` in JSON
+                # vs the field name ``log_format``.
+                if attr == "logging" and "format" in new_section and "log_format" not in new_section:
+                    new_section["log_format"] = new_section.pop("format")
+                setattr(
+                    config,
+                    attr,
+                    overlay_section(model_cls, section_name, getattr(config, attr), new_section),
+                )
+
         if "fee" in data:
-            schedules = data["fee"].get("schedules")
+            fee_data = dict(data["fee"])
+            schedules = fee_data.pop("schedules", None)
             if schedules is not None and isinstance(schedules, dict):
                 config.fee.schedules.update(schedules)
+            # Apply remaining fee fields via the standard overlay
+            # path so a future fee.* field is supported automatically.
+            config.fee = overlay_section(FeeConfig, "fee", config.fee, fee_data)
+
         if "governance" in data:
-            ranges = data["governance"].get("param_ranges")
+            gov_data = dict(data["governance"])
+            ranges = gov_data.pop("param_ranges", None)
             if ranges is not None and isinstance(ranges, dict):
                 for k, v in ranges.items():
                     if isinstance(v, (list, tuple)) and len(v) == 2:
                         config.governance.param_ranges[k] = [float(v[0]), float(v[1])]
-            defaults = data["governance"].get("param_defaults")
+            defaults = gov_data.pop("param_defaults", None)
             if defaults is not None and isinstance(defaults, dict):
                 config.governance.param_defaults.update(defaults)
-        if "audit" in data:
-            config.audit = config.audit.model_copy(
-                update=dict((k, data["audit"][k]) for k in data["audit"] if k in AuditConfig.model_fields)
+            config.governance = overlay_section(
+                GovernanceConfig, "governance", config.governance, gov_data
             )
+
+        # kfs, npa, dpdpa, razorpay, credit_bureau, underwriting all
+        # have a one-to-one Pydantic mapping; overlay each via the
+        # standard path.
+        for section_name, (model_cls, attr) in {
+            "kfs": (KfsConfig, "kfs"),
+            "npa": (NpaConfig, "npa"),
+            "dpdpa": (DpdpaConfig, "dpdpa"),
+            "razorpay": (RazorpayConfig, "razorpay"),
+            "credit_bureau": (CreditBureauConfig, "credit_bureau"),
+            "underwriting": (UnderwritingConfig, "underwriting"),
+        }.items():
+            if section_name in data:
+                setattr(
+                    config,
+                    attr,
+                    overlay_section(
+                        model_cls, section_name, getattr(config, attr), data[section_name]
+                    ),
+                )
+
         if "data_dir" in data:
             config.data_dir = data["data_dir"]
         if "services" in data:

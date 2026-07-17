@@ -360,6 +360,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `AccessControl.trust()` and the replay window. All affected
   docs (FAQ, DEPENDENCIES, ARCHITECTURE, TROUBLESHOOTING, API,
   ADR-003, DIRECTORY_STRUCTURE, CODE_STYLE) updated.
+- **Configuration.__merge was a hand-rolled Pydantic replacement**
+  — ~100 lines of bespoke per-section copy/validate/raise code
+  that duplicated `model_validate` and `model_dump`. Replaced
+  with a single `overlay_section` helper that uses
+  `model_validate({**base_dump, **overrides})` for every
+  section. The fee, governance, kfs, npa, dpdpa, razorpay,
+  credit_bureau, and underwriting sections now share the
+  same overlay path; adding a new section means adding one
+  line to a mapping instead of duplicating five lines of
+  bespoke logic.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries
