@@ -255,8 +255,8 @@ class RuleEngine:
         try:
             passed = op_fn(actual, rule.value)
         except (TypeError, ValueError, IndexError) as e:
-            logger.warning("rule %s evaluation error: %s", rule.rule_id, e)
-            passed = True
+            logger.error("rule %s evaluation error: %s — failing closed", rule.rule_id, e)
+            passed = False
 
         msg = rule.message
         if not msg:

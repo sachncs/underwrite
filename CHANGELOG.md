@@ -169,6 +169,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   does not match the RBI definition. Use the ratio of
   NPA outstanding over total outstanding (sum of all bucket
   principals) instead.
+- **Underwriter silently passed on rule evaluation error** — the
+  rule engine logged a warning and returned ``passed = True``
+  on TypeError/ValueError/IndexError, so a malformed rule or
+  invalid fact value silently turned into an approval. Rules now
+  fail closed: an evaluation error sets ``passed = False`` with
+  an error log. New tests assert that string-typed numeric
+  values no longer yield an approval.
+- **AML-frozen users passed underwriter** — the default rule
+  required ``aml_status == "cleared"`` so a frozen user with
+  stale cleared data still got the same outcome as a never-frozen
+  user. Replace with ``aml_status != "frozen"`` so the most
+  recent AML state actually gates the decision.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

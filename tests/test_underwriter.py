@@ -72,9 +72,14 @@ class TestUnderwriterApproval:
 
 class TestEdgeCases:
     def test_string_values_converted(self) -> None:
+        """Numeric fact values arrive as strings; the engine should now
+        fail closed (no approval) rather than silently passing a
+        malformed rule evaluation."""
         bus = LocalBus()
         approved: list = []
+        conditional: list = []
         bus.subscribe(EventType.UNDERWRITER_APPROVED, lambda e: approved.append(e))
+        bus.subscribe(EventType.UNDERWRITER_CONDITIONAL_APPROVED, lambda e: conditional.append(e))
         bus.start()
         svc_inst = svc(bus)
         svc_inst.handle(
@@ -92,7 +97,8 @@ class TestEdgeCases:
                 },
             )
         )
-        assert len(approved) == 1
+        assert len(approved) == 0
+        assert len(conditional) == 1
 
 
 class TestConditionalApproval:

@@ -107,13 +107,13 @@ DEFAULT_RULES: list[Rule] = [
         message="Fraud signals detected",
     ),
     Rule(
-        rule_id="aml_cleared",
+        rule_id="aml_not_frozen",
         category=RuleCategory.COMPLIANCE.value,
         field="aml_status",
-        operator="eq",
-        value="cleared",
+        operator="neq",
+        value="frozen",
         severity=RuleSeverity.CRITICAL.value,
-        message="AML check not cleared",
+        message="AML status is frozen",
     ),
     Rule(
         rule_id="kyc_verified",
