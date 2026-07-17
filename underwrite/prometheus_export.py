@@ -15,6 +15,21 @@ __all__ = [
 
 from typing import Any
 
+from underwrite.__pii import PIISanitizer, redact_text
+
+_redactor = PIISanitizer()
+
+
+def _redact_tag_value(value: str) -> str:
+    """Redacts PII patterns inside a Prometheus tag value.
+
+    Metric tag values are persisted by Prometheus for the configured
+    retention period and are visible to anyone with access to the
+    scrape endpoint. A user-controlled tag (e.g. ``loan_id``,
+    ``customer_id``) must not carry PII patterns.
+    """
+    return redact_text(str(value))
+
 
 class MetricsExporter:
     """Formats runtime metrics into Prometheus exposition text format.
@@ -74,8 +89,25 @@ class MetricsExporter:
 
     @staticmethod
     def __format_tags(tags: dict[str, str]) -> str:
-        """Format a dict of tags as a Prometheus label string."""
-        parts = [f'{k}="{v}"' for k, v in sorted(tags.items())]
+        """Format a dict of tags as a Prometheus label string.
+
+        Escapes backslashes, double-quotes, and newlines so a
+        user-controlled tag value (e.g. a service id) cannot break
+        out of the label string and inject arbitrary exposition
+        content. Also redacts PII patterns inside tag values so a
+        misconfigured caller cannot persist PAN/Aadhaar/mobile
+        numbers into the Prometheus TSDB.
+        """
+        parts: list[str] = []
+        for k, v in sorted(tags.items()):
+            safe_k = MetricsExporter.__sanitize(str(k))
+            safe_v = (
+                _redact_tag_value(v)
+                .replace("\\", "\\\\")
+                .replace("\n", "\\n")
+                .replace('"', '\\"')
+            )
+            parts.append(f'{safe_k}="{safe_v}"')
         return ",".join(parts)
 
 

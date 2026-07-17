@@ -120,6 +120,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   field names. Regression tests cover the over-matching cases
   (company, panel_id, panchayat, author, pinterest) and the
   legitimate matches (user_pin_code, aadhaar_token, mobile_number).
+- **DLQ stored full event payloads with PII** — `DeadLetterQueue.put`
+  appended the raw `Event` to the in-memory and persistent DLQ, so
+  PAN, Aadhaar, mobile numbers and other PII patterns persisted in
+  the DLQ for the configured retention period. The DLQ now redacts
+  the event payload (PII field names and value patterns) before
+  storage; the in-flight event in memory is untouched. New
+  regression test `test_put_redacts_pii` covers the path.
+- **Prometheus exposition was vulnerable to label-value injection and
+  PII persistence** — tag values were interpolated unescaped, so a
+  user-controlled tag containing `"` or `\n` could break out of the
+  label string and inject arbitrary exposition content. Tag values
+  are now escaped for backslash, double-quote, and newline. Tag
+  values are also run through the PII redactor so a misconfigured
+  caller cannot persist PAN/Aadhaar/mobile numbers into the
+  Prometheus TSDB.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

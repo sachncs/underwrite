@@ -46,6 +46,17 @@ class TestDeadLetterQueue:
         assert n == 1
         assert dlq.count == 1
 
+    def test_put_redacts_pii(self) -> None:
+        dlq = DeadLetterQueue()
+        dlq.put(
+            Event(event_type="loan.originated", source="origination", payload={"pan": "ABCDE1234F", "loan_id": "L100"}),
+            "err",
+            "s1",
+        )
+        record = dlq.records[0]
+        assert record.event.payload["pan"] == "***REDACTED***"
+        assert record.event.payload["loan_id"] == "L100"
+
     def test_cap_evicts_oldest(self) -> None:
         dlq = DeadLetterQueue(max_records=3)
         for i in range(5):

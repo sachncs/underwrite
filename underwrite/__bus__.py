@@ -34,7 +34,36 @@ from typing import Any
 from underwrite.__events__ import Event
 from underwrite.__exceptions__ import RateLimitError
 from underwrite.__logger__ import logger
+from underwrite.__pii import PIISanitizer
 from underwrite.__store__ import Store
+
+_sanitizer = PIISanitizer()
+
+
+def _redact_event(event: Event) -> Event:
+    """Returns a copy of *event* with PII fields and values redacted.
+
+    The DLQ, the audit ledger, and the Prometheus label pipeline
+    are all read by humans or scraped by monitoring systems and
+    must not carry PAN, Aadhaar, mobile numbers, etc. The redacted
+    copy is what they observe; the in-flight event in memory is
+    untouched.
+    """
+    sanitized_payload = _sanitizer.sanitize(dict(event.payload))
+    if sanitized_payload == event.payload:
+        return event
+    return Event(
+        event_id=event.event_id,
+        event_type=event.event_type,
+        source=event.source,
+        source_key=event.source_key,
+        timestamp=event.timestamp,
+        payload=sanitized_payload,
+        correlation_id=event.correlation_id,
+        signature=event.signature,
+        trace_id=event.trace_id,
+        parent_span_id=event.parent_span_id,
+    )
 
 
 @dataclass
@@ -163,10 +192,13 @@ class DeadLetterQueue:
             error: Description of the failure.
             subscriber_id: Identifier of the subscriber that failed.
         """
+        sanitized_event = _redact_event(event)
         with self.__lock:
             if len(self.__records) >= self.__max_records:
                 self.__records.pop(0)
-            self.__records.append(DeadLetterRecord(event=event, error=error, subscriber_id=subscriber_id))
+            self.__records.append(
+                DeadLetterRecord(event=sanitized_event, error=error, subscriber_id=subscriber_id)
+            )
             if self.__should_sync():
                 self.__sync_store()
 
