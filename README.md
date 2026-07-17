@@ -24,16 +24,35 @@
 
 ## Status
 
-This is an early-stage **beta**. It is **not production-ready**. Known gaps:
+This is the v0.9 release line. Security and correctness fixes from the
+hardening pass:
 
-- Real API integrations for PAN (NSDL/ITD), Aadhaar (UIDAI), CKYC, CIBIL, and AML blocklists are **stubbed** — format validation only.
+- Ed25519 event signatures bind the source and enforce a 5-minute
+  replay window; private keys persist through the configured
+  `SecretsManager`.
+- `/v1/publish` binds the publisher identity from the request
+  payload, with an optional authz gate.
+- PII is redacted at the audit, DLQ, and Prometheus tag boundaries
+  with token-based field matching.
+- DLQ, bus buffer, and idempotency guard are bounded against
+  unbounded memory growth.
+- Config redaction covers every secret-shaped field; config
+  `data_dir` is validated against sensitive system paths.
+- Indian holiday calendar covers 2025–2030 with a sensible
+  fallback for unknown years.
+- KFS APR math, pricing EMI, NPA thresholds, and the
+  underwriter rule engine are all aligned with RBI norms.
+
+Remaining work to reach v1.0:
+
+- Real API integrations for PAN (NSDL/ITD), Aadhaar (UIDAI), CKYC,
+  CIBIL, and AML blocklists are still stubbed — the framework is
+  in place but the production credentials are not.
 - Video KYC provider integration is not yet implemented.
-- e-NACH / UPI Autopay mandate collection is **stubbed** (event definitions exist; Razorpay integration skeleton present).
-- No RBAC beyond basic access control.
-- No disaster recovery procedures documented.
-- Developer experience is rough — no pre-built Docker images, no Helm charts, manual service wiring required.
-
-If you need a production-grade Indian lending platform today, underwrite is not the right choice.
+- e-NACH / UPI Autopay mandate collection is stubbed at the
+  protocol level (Razorpay integration skeleton is in place).
+- No Helm charts, no pre-built Docker images, manual service
+  wiring still required for multi-process deployments.
 
 ## Installation
 

@@ -14,24 +14,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `LocalBus.is_stopped()` and `LocalBus.subscriber_count()` public accessors;
   runtime bus health probe now reports the real subscriber count and
   stopped-state instead of always returning `ok: True`.
-- SQS distributed event bus backend (`__bus_sqs__.py`, 172 lines)
-- Modal distributed event bus backend (`__bus_modal__.py`, 141 lines)
-- DPDPA 2023 compliance config: `ConsentConfig`, `DsrConfig`, `DpdpaConfig` with consent validity, DSR response SLA, breach notification timer, data retention periods
-- `NpaConfig` with SMA-0/1/2 thresholds, provisioning rates per RBI IRAC norms
-- `UnderwritingConfig` with credit score floor, DTI cap, LTV cap, min/max principal, tenor
-- `CreditBureauConfig` for CIBIL/Experian/Equifax + CKYC API keys and endpoints
-- `KfsConfig` for Key Fact Statement cooling-off period per RBI DLG
-- `RazorpayConfig` for payment gateway integration (UPI Autopay, e-NACH)
-- Missing SERVICE_NAMES entries: `consent`, `dsr`, `credit_bureau`, `kfs`
-- WIRING entries for `aml.flagged`, `kyc.video_initiated`, `kyc.video_verified`, `pricing.penal_interest`, `pricing.foreclosure`, `recovery.offer`, `recovery.escalated`, `recovery.progress`
-- AML blocklist path (`AML_BLOCKLIST_PATH`) env var support
-- Per-product RBI pricing cap env vars (`UNDERWRITE_PERSONAL_LOAN_RATE_CAP`, `UNDERWRITE_MICRO_LOAN_RATE_CAP`, `UNDERWRITE_PENAL_INTEREST_CAP`, `UNDERWRITE_COOLING_OFF_DAYS`)
-- Credit bureau / CKYC / Razorpay / DPDPA env vars
-- AML env vars (`AML_BLOCKLIST_PATH`, `AML_THRESHOLD_LOW`, `AML_THRESHOLD_FROZEN`)
-- `UNDERWRITE_SQS_QUEUE_URL`, `UNDERWRITE_SQS_REGION`, `UNDERWRITE_MODAL_QUEUE_NAME` env vars
-- KFS env vars (`UNDERWRITE_KFS_COOLING_OFF_DAYS`, `UNDERWRITE_KFS_DISCLOSURE_VERSION`)
-- 9 Indian-market docs updated (ENVIRONMENT_VARIABLES, CONFIGURATION, DOMAIN_MODEL, SECURITY, QUICKSTART, API, DEPLOYMENT, ROADMAP, OPERATIONS)
-- Honest README.md with beta warning and known gaps documented
+- Runtime identity, `Event.canonical_sign_bytes()` (binds source),
+  `AccessControl.set_replay_window()` and
+  `AccessControl.is_trusted()`.
+- `Identity.to_pem()` and `Identity.persist()`; new
+  `Identity.create(secrets_manager=...)` flow persists Ed25519
+  keys through the configured secrets backend so provenance
+  survives restarts.
+- `Runtime.publish_as(source, event_type, payload, correlation_id)`
+  binds the publisher identity; `/v1/publish` now requires a
+  `source` field and uses this path.
+- `RazorpayClient.webhook_secret()` accessor; the service refuses
+  webhooks when no secret is configured and verifies against the
+  configured client secret (never a value from the payload).
+- `Plugins.discover()` allowlist via `UNDERWRITE_PLUGINS` env var.
+- `PII_FIELD_PATTERNS` token-based field matching in
+  `__pii__.PIISanitizer`; new `Event.canonical_sign_bytes()`.
+- `DeadLetterQueue.put` redacts PII before persistence; the
+  in-flight event in memory is untouched.
+- `MetricsExporter.__format_tags` escapes backslash, double-quote,
+  and newline; tag values are run through the PII redactor.
+- Damped Newton-Raphson KFS APR with correct analytic derivative.
+- `Decimal` EMI/APR arithmetic in pricing.
+- Bounded handler buckets in `IdempotencyGuard` (default 1000).
+- Self-expiring `DistributedRateLimiter` via per-key
+  `{"expires_at": ...}` marker.
+- `RetryPolicy.non_retryable_exceptions` parameter defaulting to
+  programmer-error types.
+- `Configuration._validate_data_dir` rejects sensitive system paths.
+- `OtlpSpanExporter(insecure, headers)` for TLS / auth.
+- `Configuration.to_dict` redacts every secret-shaped field across
+  every config section.
+- 3.10/3.11/3.12/3.13 CI matrix; TruffleHog secret scan; coverage
+  gate (`--cov-fail-under=80`).
+- Per-saga try/except in `SagaOrchestrator.__load_sagas`.
+- 50+ regression tests covering each of the above.
 
 ### Changed
 - **Compliance service** — from basic PAN/Aadhaar regex to PAN category detection, Aadhaar Verhoeff checksum, weighted keyword AML risk scoring (low/flagged/frozen), CKYC event emission, video KYC lifecycle hooks, consent pre-check
@@ -46,6 +63,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - PII redaction — Aadhaar-like 12-digit and PAN-like patterns redacted in logs and audit
 - `LocalBus` lifecycle: a freshly constructed bus is now considered running.
   `start()` is idempotent and flushes the buffer only on the first call.
+- **Hardening pass (v0.9)**: PII regex rewrite, all math corrections,
+  per-saga error isolation, bounded IdempotencyGuard, deque-based
+  bus hot paths, dead test fixtures removed, single-source-of-truth
+  `SERVICE_NAMES`, full Python CI matrix.
 
 ### Fixed
 - `UNDERWRITE_RECOVERY_BACKOFF` env var now correctly maps to `recovery.backoff_seconds`
@@ -318,6 +339,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `.pre-commit-config.yaml` (pre-commit hooks removed from repo)
 - Flaky `test_communication.py` tests — removed 12 dead/duplicate test cases
 - Misleading "Production-hardened" and "828+ tests" claims in README
+- Dead test fixtures `FailAfterCountStore` and `InjectingBus` from `tests/conftest.py` —
+  neither was imported by any test file.
 
 ### Security
 - PII redaction — Aadhaar (12-digit), PAN, Voter ID, passport, bank account patterns masked in logs
