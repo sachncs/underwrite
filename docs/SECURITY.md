@@ -64,38 +64,61 @@ Set `authz.policy_file` in config or `UNDERWRITE_AUTHZ_POLICY_FILE`.
 ## Cryptographic Provenance
 
 Every event emitted by a nano service is **Ed25519-signed** by the
-service's `Identity`.
+service's `Identity`. The signed payload binds the source so a holder
+of any trusted key cannot re-stamp events under another service id.
 
-### Signing (`services/base.py:246-285`)
+### Signing (`services/base.py:233-285`)
 
-```python
-to_sign = f"{event.event_id}:{event.timestamp}:{event.event_type}:{payload_str}"
-signature = self.__identity.sign(to_sign)
-```
-
-The signature and public key (`source_key`) are attached to the `Event`
-envelope.
-
-### Verification (`__authz__.py:152-178`)
-
-The receiving service reconstructs the signed payload and verifies:
+The signing bytes are produced by `Event.canonical_sign_bytes()`:
 
 ```python
-public_key.verify(signature, to_sign)
+to_sign = (
+    f"{event.event_id}|{event.timestamp}|{event.event_type}"
+    f"|{event.source}|{payload_str}"
+)
+signature = identity.sign(to_sign)
 ```
+
+The pipe-separated form binds the source into the signed bytes, and
+the payload is JSON-encoded with sorted keys so the signature is stable
+across dict iteration order. The signature and public key
+(`source_key`) are attached to the `Event` envelope.
+
+### Verification (`__authz__.py:155-203`)
+
+The receiving service reconstructs the canonical bytes and verifies:
+
+```python
+public_key.verify(signature, event.canonical_sign_bytes())
+```
+
+A 5-minute clock window is enforced: events older than
+`--replay-window` (or dated more than that far in the future) are
+rejected. Set the window with `AccessControl.set_replay_window(seconds)`;
+pass `0` (or a negative value) to disable the check (not recommended).
 
 ### Trust Model
 
 - `AccessControl.trust(service_id, public_key)` registers a trusted key.
 - `AccessControl.revoke_trust(service_id)` removes it.
+- `AccessControl.is_trusted(service_id)` checks for a registered key.
 - `verify_signature()` returns `False` if no trusted key is registered
   for the event source.
-- When `cryptography` library is unavailable, all signatures are accepted
-  (development mode — warns in logs).
+- When `cryptography` library is unavailable, the import fails
+  loudly — there is no silent insecure fallback.
 
 ---
 
 ## Key Management
+
+Service identities are persisted through the configured
+`SecretsManager`. The runtime identity is created at startup; service
+identities are created the first time `Identity.create(service_id,
+secrets_manager=...)` is called. PEM-encoded keys are stored at
+`underwrite/{service_id}/private_key` (or via the backend's equivalent
+path) and loaded on every restart. The new
+`Identity.to_pem()` / `Identity.persist()` helpers expose the private
+key for external storage.
 
 **Module:** `underwrite/__identity__.py`
 

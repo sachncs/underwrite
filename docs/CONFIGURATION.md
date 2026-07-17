@@ -8,8 +8,8 @@ identity), and service-specific parameters.
 
 ## 1. Configuration Loading
 
-At startup, `Configuration.load()` (`underwrite/__config__.py:231`) searches
-for a configuration file in the following order:
+At startup, `Configuration.load()` searches for a configuration file
+in the following order:
 
 1.  **Explicit path** — if a path argument is provided and the file exists,
     it is loaded immediately.
@@ -20,12 +20,30 @@ for a configuration file in the following order:
 
 After file loading, `__apply_env_overrides()` overlays any matching
 `UNDERWRITE_*` environment variables on top (see
-[ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md)).
+[ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md)). Values that
+fail to parse (e.g. `UNDERWRITE_AUTHZ_ENABLED=garbage`) are logged
+and the default is left in place — features are never silently
+disabled by a bad env var.
+
+The `data_dir` field is validated against a deny-list of sensitive
+system paths (`/etc`, `/proc`, `/sys`, `/var`, `/usr`) to prevent
+a misconfigured `Configuration.data_dir=/etc` from clobbering
+system files.
+
+### Secret Redaction on Save
+
+`Configuration.to_dict()` redacts every secret-shaped field across
+every config section before the dict is written to disk by
+`Configuration.save()`. The redaction list covers
+`key_secret`, `webhook_secret`, `api_token`, `token`,
+`private_key`, `encryption_passphrase`, `cibil_api_key`,
+`experian_api_key`, `equifax_api_key`, and `ckyc_api_key`. There
+is no path through the public API that persists these values
+in plaintext.
 
 ```python
 config = Configuration.load("underwrite.json")
-# or
-config = Configuration.default()
+config.save("audit-only.json")  # secrets are redacted
 ```
 
 ---
