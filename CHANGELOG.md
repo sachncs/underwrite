@@ -269,6 +269,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `data_dir=/etc` would have the FileStore read/write system
   paths. Add a Pydantic field validator that rejects sensitive
   system paths (/, /etc, /proc, /sys, /var, /usr).
+- **`.env.example` documented env vars that were silently ignored**
+  — `UNDERWRITE_SQS_QUEUE_URL`, `UNDERWRITE_SQS_REGION`,
+  `UNDERWRITE_MODAL_QUEUE_NAME`, `UNDERWRITE_COOLING_OFF_DAYS`,
+  and the RBI pricing caps were listed but never read by
+  `Configuration.__apply_env_overrides`. Document the variables
+  that are actually honoured, add the missing ones
+  (`UNDERWRITE_BUS_MAX_BUFFER_SIZE`, `UNDERWRITE_OTLP_ENDPOINT`,
+  `UNDERWRITE_REQUIRE_AUTH`, `UNDERWRITE_ALLOW_JOBLIB`,
+  `UNDERWRITE_PLUGINS`, `VAULT_TOKEN`), and remove the dead ones
+  with a comment explaining the no-env-override services.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries
