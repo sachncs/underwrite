@@ -51,6 +51,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from underwrite.__exceptions__ import ConfigurationError
 from underwrite.__logger__ import logger
+from underwrite.services.kyc_providers.factory import KycProviderConfig
 
 
 class ForbidExtra(BaseModel):
@@ -417,6 +418,7 @@ class Configuration(ForbidExtra):
     razorpay: RazorpayConfig = Field(default_factory=RazorpayConfig)
     credit_bureau: CreditBureauConfig = Field(default_factory=CreditBureauConfig)
     underwriting: UnderwritingConfig = Field(default_factory=UnderwritingConfig)
+    kyc_providers: KycProviderConfig = Field(default_factory=KycProviderConfig)
 
     @classmethod
     def default(cls) -> Configuration:
@@ -487,6 +489,14 @@ class Configuration(ForbidExtra):
             "experian_api_key",
             "equifax_api_key",
             "ckyc_api_key",
+            "pan_client_id",
+            "pan_client_secret",
+            "aadhaar_kua_id",
+            "aadhaar_kua_license_key",
+            "cibil_partner_id",
+            "cibil_partner_key",
+            "ckyc_search_provider_id",
+            "ckyc_search_provider_key",
         )
         for section in d.values():
             if isinstance(section, dict):
@@ -541,6 +551,7 @@ class Configuration(ForbidExtra):
             "razorpay",
             "credit_bureau",
             "underwriting",
+            "kyc_providers",
         }
         unknown = set(data.keys()) - known_keys
         if unknown:
@@ -617,9 +628,9 @@ class Configuration(ForbidExtra):
                 GovernanceConfig, "governance", config.governance, gov_data
             )
 
-        # kfs, npa, dpdpa, razorpay, credit_bureau, underwriting all
-        # have a one-to-one Pydantic mapping; overlay each via the
-        # standard path.
+        # kfs, npa, dpdpa, razorpay, credit_bureau, underwriting,
+        # kyc_providers all have a one-to-one Pydantic mapping;
+        # overlay each via the standard path.
         for section_name, (model_cls, attr) in {
             "kfs": (KfsConfig, "kfs"),
             "npa": (NpaConfig, "npa"),
@@ -627,6 +638,7 @@ class Configuration(ForbidExtra):
             "razorpay": (RazorpayConfig, "razorpay"),
             "credit_bureau": (CreditBureauConfig, "credit_bureau"),
             "underwriting": (UnderwritingConfig, "underwriting"),
+            "kyc_providers": (KycProviderConfig, "kyc_providers"),
         }.items():
             if section_name in data:
                 setattr(
