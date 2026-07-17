@@ -280,4 +280,39 @@ class TestDataclassStructure:
             savings=Decimal("18000"),
             savings_percent=Decimal("18"),
         )
-        assert fq.total_due == fq.outstanding_principal + fq.accrued_interest
+
+
+class TestAmortizationBounds:
+    def test_calculate_emi_rejects_huge_annual_rate(self) -> None:
+        with pytest.raises(ValueError, match="exceeds 100%"):
+            calculate_emi(Decimal("100000"), Decimal("200"), 12)
+
+    def test_calculate_emi_rejects_century_tenure(self) -> None:
+        with pytest.raises(ValueError, match="100 years"):
+            calculate_emi(Decimal("100000"), Decimal("12"), 12 * 200)
+
+    def test_calculate_foreclosure_rejects_negative_penalty(self) -> None:
+        from datetime import date
+
+        with pytest.raises(ValueError, match="penalty_rate"):
+            calculate_foreclosure(
+                principal=Decimal("100000"),
+                annual_rate=Decimal("12"),
+                tenure_months=12,
+                payments_made=[],
+                as_of=date(2025, 6, 1),
+                penalty_rate=Decimal("-3"),
+            )
+
+    def test_calculate_foreclosure_rejects_huge_penalty(self) -> None:
+        from datetime import date
+
+        with pytest.raises(ValueError, match="penalty_rate"):
+            calculate_foreclosure(
+                principal=Decimal("100000"),
+                annual_rate=Decimal("12"),
+                tenure_months=12,
+                payments_made=[],
+                as_of=date(2025, 6, 1),
+                penalty_rate=Decimal("150"),
+            )

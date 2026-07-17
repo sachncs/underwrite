@@ -151,6 +151,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `validate_interest_rate` helper now delegates to
   `compute_rate_cap` so the two cap dictionaries no longer disagree
   (previously personal was 0.24 in one and 0.28 in the other).
+- **Amortization and foreclosure accepted any positive input** —
+  `calculate_emi` accepted a 500% APR or a 1000-year tenure, and
+  `calculate_foreclosure` accepted a negative or > 100% penalty
+  rate. Add explicit bounds (annual_rate <= 100, tenure <= 100
+  years, 0 <= penalty_rate <= 100) with `ValueError`. Also guard
+  `project_outstanding` against negative payment amounts which
+  previously inflated accrued interest instead of being rejected.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

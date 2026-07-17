@@ -104,8 +104,14 @@ def calculate_emi(principal: Decimal, annual_rate: Decimal, tenure_months: int) 
         raise ValueError("principal must be positive")
     if annual_rate <= 0:
         raise ValueError("annual_rate must be positive")
+    if annual_rate > Decimal("100"):
+        raise ValueError(f"annual_rate {annual_rate} exceeds 100% sanity bound")
     if tenure_months <= 0:
         raise ValueError("tenure_months must be positive")
+    if tenure_months > 12 * 100:
+        raise ValueError(
+            f"tenure_months {tenure_months} exceeds 100 years; refusing to compute"
+        )
     monthly_rate = annual_rate / Decimal("1200")
     if monthly_rate == 0:
         return _round_money(principal / Decimal(tenure_months))
@@ -255,7 +261,10 @@ def project_outstanding(
         except ValueError:
             last_date = date(year, month, 1)
 
-    payments = sorted(payments_made, key=lambda x: x[0])
+    payments = sorted(
+        (p for p in payments_made if p[1] >= 0),
+        key=lambda x: x[0],
+    )
     accrued = Decimal("0")
 
     prev_date = min(payments[0][0] if payments else as_of, as_of)
@@ -265,7 +274,7 @@ def project_outstanding(
         days = (pay_date - prev_date).days
         if days > 0:
             accrued += _round_money(outstanding * daily_rate * Decimal(days))
-        if amount > accrued:
+        if amount >= accrued:
             principal_part = amount - accrued
             outstanding -= principal_part
             if outstanding < Decimal("0.01"):
@@ -338,6 +347,12 @@ def calculate_foreclosure(
         ForeclosureQuote with breakdown.
     """
     outstanding = project_outstanding(principal, annual_rate, tenure_months, payments_made, as_of)
+    if penalty_rate < Decimal("0") or penalty_rate > Decimal("100"):
+        raise ValueError(
+            f"penalty_rate must be between 0 and 100 (got {penalty_rate})"
+        )
+    if outstanding.total_outstanding < Decimal("0"):
+        raise ValueError("computed outstanding is negative; check inputs")
     penalty = _round_money(outstanding.total_outstanding * penalty_rate / Decimal("100"))
     total_due = _round_money(outstanding.total_outstanding + penalty)
 
