@@ -148,16 +148,35 @@ class SagaOrchestrator:
         return f"saga:{saga_id}"
 
     def __load_sagas(self) -> None:
-        """Restore all persisted sagas from the store on startup."""
+        """Restore all persisted sagas from the store on startup.
+
+        Each saga is loaded and validated independently — a single
+        corrupted record no longer drops every other in-flight
+        saga. The store-level keys() call is the only place that
+        can still fail wholesale; that is logged and abandoned so
+        the runtime can start with an empty in-memory state.
+        """
         try:
-            for key in self.__store.keys("saga:", limit=10000):
-                raw = self.__store.get(key)
-                if raw is not None and isinstance(raw, dict):
-                    saga = Saga.from_dict(raw)
-                    saga.validate()
-                    self.__sagas[saga.saga_id] = saga
+            keys = self.__store.keys("saga:", limit=10000)
         except Exception:
-            logger.exception("failed to load persisted sagas, starting fresh")
+            logger.exception("failed to enumerate persisted sagas, starting fresh")
+            return
+        for key in keys:
+            try:
+                raw = self.__store.get(key)
+            except Exception:
+                logger.exception("failed to read saga key %s, skipping", key)
+                continue
+            if raw is None or not isinstance(raw, dict):
+                logger.warning("skipping non-dict saga record at %s", key)
+                continue
+            try:
+                saga = Saga.from_dict(raw)
+                saga.validate()
+            except Exception:
+                logger.exception("saga at %s failed to deserialize, skipping", key)
+                continue
+            self.__sagas[saga.saga_id] = saga
 
     def __persist_saga(self, saga: Saga) -> None:
         """Write saga state to the store."""

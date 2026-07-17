@@ -223,6 +223,28 @@ class TestSagaPersistence:
         assert "step event.b failed" in raw["error"]
 
 
+class TestSagaCorruptLoad:
+    def test_corrupt_record_does_not_drop_others(self) -> None:
+        """A single corrupted saga record must not drop every other
+        in-flight saga on startup."""
+        from underwrite.__events__ import Event
+        from underwrite.__store__ import MemoryStore
+
+        store = MemoryStore()
+        # Persist a valid saga
+        orch1 = SagaOrchestrator(store=store)
+        orch1.register_emitter("a", FakeEmitter())
+        sid1 = orch1.start_saga(
+            "valid",
+            [SagaStep(name="s1", forward_event_type="a", forward_payload={}, compensate_event_type=None, compensate_payload={})],
+        )
+        # Inject a corrupt record at a different key
+        store.set("saga:corrupt", {"this": "is", "not": "a valid saga"})
+        # New orchestrator should skip the corrupt record but load the valid one
+        orch2 = SagaOrchestrator(store=store)
+        assert sid1 in orch2._SagaOrchestrator__sagas  # noqa: SLF001
+
+
 class TestSagaValidation:
     def test_validate_passes_for_valid_saga(self) -> None:
         saga = Saga(

@@ -238,6 +238,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   listing them in `retryable_exceptions` to retry them. PostgresStore
   now retries only on `OperationalError`, `InterfaceError`,
   `ConnectionResetError`, `TimeoutError`.
+- **One corrupted saga dropped every in-flight saga on startup**
+  — `SagaOrchestrator.__load_sagas` did a single try/except over
+  the entire loop, so any deserialisation error wiped the
+  in-memory saga state. Each saga is now loaded, parsed, and
+  validated independently; the only thing that fails wholesale
+  is the store-level `keys()` enumeration. Regression test
+  covers the corrupt-record path.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries
