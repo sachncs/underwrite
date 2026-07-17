@@ -11,6 +11,15 @@ def svc(bus=None) -> RazorpayService:
     return RazorpayService(service_id="razorpay", bus=bus)
 
 
+def _configure_webhook_secret(svc_inst, secret: str) -> None:
+    """Configure the mock client's webhook secret before a test."""
+    client = svc_inst.client
+    if hasattr(client, "set_webhook_secret"):
+        client.set_webhook_secret(secret)
+    elif hasattr(client, "_HttpRazorpayClient__webhook_secret"):
+        client._HttpRazorpayClient__webhook_secret = secret  # noqa: SLF001
+
+
 class TestRazorpayServiceOrder:
     def test_create_order_missing_loan_id_ignored(self) -> None:
         bus = LocalBus()
@@ -198,6 +207,7 @@ class TestRazorpayServiceWebhook:
         bus.subscribe(EventType.RAZORPAY_PAYMENT_CAPTURED, lambda e: received.append(e))
         svc_inst = svc(bus)
         bus.start()
+        _configure_webhook_secret(svc_inst, "secret")
         svc_inst.handle(
             Event(
                 event_type=EventType.RAZORPAY_WEBHOOK_RECEIVED,
@@ -205,7 +215,6 @@ class TestRazorpayServiceWebhook:
                 payload={
                     "payload": '{"event":"test"}',
                     "signature": "bad_sig",
-                    "webhook_secret": "secret",
                 },
             )
         )
@@ -243,6 +252,7 @@ class TestRazorpayServiceWebhook:
         bus.subscribe(EventType.RAZORPAY_PAYMENT_CAPTURED, lambda e: received.append(e))
         svc_inst = svc(bus)
         bus.start()
+        _configure_webhook_secret(svc_inst, secret)
         svc_inst.handle(
             Event(
                 event_type=EventType.RAZORPAY_WEBHOOK_RECEIVED,
@@ -250,7 +260,6 @@ class TestRazorpayServiceWebhook:
                 payload={
                     "payload": payload_str,
                     "signature": signature,
-                    "webhook_secret": secret,
                 },
             )
         )
@@ -293,6 +302,7 @@ class TestRazorpayServiceWebhook:
         bus.subscribe(EventType.RAZORPAY_PAYMENT_FAILED, lambda e: received.append(e))
         svc_inst = svc(bus)
         bus.start()
+        _configure_webhook_secret(svc_inst, secret)
         svc_inst.handle(
             Event(
                 event_type=EventType.RAZORPAY_WEBHOOK_RECEIVED,
@@ -300,7 +310,6 @@ class TestRazorpayServiceWebhook:
                 payload={
                     "payload": payload_str,
                     "signature": signature,
-                    "webhook_secret": secret,
                 },
             )
         )
@@ -341,6 +350,7 @@ class TestRazorpayServiceWebhook:
         bus.subscribe(EventType.RAZORPAY_PAYMENT_REFUNDED, lambda e: received.append(e))
         svc_inst = svc(bus)
         bus.start()
+        _configure_webhook_secret(svc_inst, secret)
         svc_inst.handle(
             Event(
                 event_type=EventType.RAZORPAY_WEBHOOK_RECEIVED,
@@ -348,7 +358,6 @@ class TestRazorpayServiceWebhook:
                 payload={
                     "payload": payload_str,
                     "signature": signature,
-                    "webhook_secret": secret,
                 },
             )
         )
@@ -384,6 +393,7 @@ class TestRazorpayServiceWebhook:
         bus.subscribe(EventType.RAZORPAY_PAYMENT_CAPTURED, lambda e: received.append(e))
         svc_inst = svc(bus)
         bus.start()
+        _configure_webhook_secret(svc_inst, secret)
         svc_inst.handle(
             Event(
                 event_type=EventType.RAZORPAY_WEBHOOK_RECEIVED,
@@ -391,7 +401,6 @@ class TestRazorpayServiceWebhook:
                 payload={
                     "payload": payload_str,
                     "signature": signature,
-                    "webhook_secret": secret,
                 },
             )
         )
@@ -431,6 +440,7 @@ class TestRazorpayServiceWebhook:
         bus.subscribe(EventType.RAZORPAY_SUBSCRIPTION_CHARGED, lambda e: received.append(e))
         svc_inst = svc(bus)
         bus.start()
+        _configure_webhook_secret(svc_inst, secret)
         svc_inst.handle(
             Event(
                 event_type=EventType.RAZORPAY_WEBHOOK_RECEIVED,
@@ -438,7 +448,6 @@ class TestRazorpayServiceWebhook:
                 payload={
                     "payload": payload_str,
                     "signature": signature,
-                    "webhook_secret": secret,
                 },
             )
         )
@@ -482,6 +491,7 @@ class TestRazorpayServiceWebhook:
         bus.subscribe(EventType.RAZORPAY_SUBSCRIPTION_FAILED, lambda e: received.append(e))
         svc_inst = svc(bus)
         bus.start()
+        _configure_webhook_secret(svc_inst, secret)
         svc_inst.handle(
             Event(
                 event_type=EventType.RAZORPAY_WEBHOOK_RECEIVED,
@@ -489,7 +499,6 @@ class TestRazorpayServiceWebhook:
                 payload={
                     "payload": payload_str,
                     "signature": signature,
-                    "webhook_secret": secret,
                 },
             )
         )
@@ -524,6 +533,7 @@ class TestRazorpayServiceWebhook:
         bus.subscribe(EventType.RAZORPAY_MANDATE_ACTIVE, lambda e: received.append(e))
         svc_inst = svc(bus)
         bus.start()
+        _configure_webhook_secret(svc_inst, secret)
         svc_inst.handle(
             Event(
                 event_type=EventType.RAZORPAY_WEBHOOK_RECEIVED,
@@ -531,7 +541,6 @@ class TestRazorpayServiceWebhook:
                 payload={
                     "payload": payload_str,
                     "signature": signature,
-                    "webhook_secret": secret,
                 },
             )
         )
@@ -566,6 +575,7 @@ class TestRazorpayServiceWebhook:
         bus.subscribe(EventType.RAZORPAY_MANDATE_INACTIVE, lambda e: received.append(e))
         svc_inst = svc(bus)
         bus.start()
+        _configure_webhook_secret(svc_inst, secret)
         svc_inst.handle(
             Event(
                 event_type=EventType.RAZORPAY_WEBHOOK_RECEIVED,
@@ -573,7 +583,6 @@ class TestRazorpayServiceWebhook:
                 payload={
                     "payload": payload_str,
                     "signature": signature,
-                    "webhook_secret": secret,
                 },
             )
         )

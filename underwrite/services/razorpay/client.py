@@ -108,6 +108,16 @@ class RazorpayClient(ABC):
     """
 
     @abstractmethod
+    def webhook_secret(self) -> str:
+        """Returns the configured webhook secret used for signature verification.
+
+        The service MUST use this value (not anything read from the
+        incoming payload) to verify webhook signatures, otherwise an
+        attacker who controls the payload can submit their own secret
+        and bypass the HMAC check.
+        """
+
+    @abstractmethod
     def create_order(
         self,
         amount: int,
@@ -255,6 +265,9 @@ class HttpRazorpayClient(RazorpayClient):
             auth=(self.__key_id, self.__key_secret),
             timeout=self.__timeout,
         )
+
+    def webhook_secret(self) -> str:
+        return self.__webhook_secret or ""
 
     def request(
         self,
@@ -551,6 +564,13 @@ class MockRazorpayClient(RazorpayClient):
         self.refunds: list[dict[str, Any]] = []
         self.fail_on: dict[str, Exception] = {}
         self.counter: int = 0
+        self._webhook_secret: str = "test_webhook_secret"
+
+    def webhook_secret(self) -> str:
+        return self._webhook_secret
+
+    def set_webhook_secret(self, secret: str) -> None:
+        self._webhook_secret = secret
 
     def next_id(self, prefix: str) -> str:
         """Generate a unique test ID with the given prefix.

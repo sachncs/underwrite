@@ -91,6 +91,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   runtime `SecretsManager`, and signs the event with that identity.
   When authz is enabled, the source must be already trusted or the
   request is rejected.
+- **Razorpay webhook signature verified against a client-supplied secret**
+  — the service read `webhook_secret` from the untrusted event payload
+  and passed it straight into the HMAC check, so an attacker could
+  submit their own secret and bypass the signature. The service now
+  pulls the secret from the configured Razorpay client
+  (`RazorpayClient.webhook_secret()`) and rejects webhooks when the
+  client has no secret configured. Tests updated to set the secret
+  on the mock client.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

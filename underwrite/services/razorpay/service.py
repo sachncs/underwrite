@@ -235,20 +235,26 @@ class RazorpayService(StatefulService):
     def __on_webhook_received(self, event: Event) -> None:
         """Process an incoming Razorpay webhook event.
 
-        Validates the signature before processing the payload.
-        Emits the appropriate domain event (captured, failed, refunded).
+        Validates the signature against the configured client secret
+        (not a value from the untrusted payload) before processing the
+        payload. Emits the appropriate domain event (captured, failed,
+        refunded).
         """
         p = event.payload
         payload_bytes_str: str = p.get("payload", "")
         signature: str = p.get("signature", "")
-        webhook_secret: str = p.get("webhook_secret", "")
 
         if not payload_bytes_str or not signature:
             logger.warning("webhook missing payload or signature, skipped")
             return
 
+        configured_secret = self.__client.webhook_secret() if hasattr(self.__client, "webhook_secret") else None
+        if not configured_secret:
+            logger.error("razorpay webhook secret not configured; rejecting webhook")
+            return
+
         payload_bytes = payload_bytes_str.encode("utf-8")
-        valid = self.__client.verify_webhook(payload_bytes, signature, webhook_secret)
+        valid = self.__client.verify_webhook(payload_bytes, signature, configured_secret)
         if not valid:
             logger.warning("invalid webhook signature, dropped")
             return
