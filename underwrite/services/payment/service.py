@@ -11,6 +11,7 @@ domain-level ``payment.received`` events so downstream services
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -55,7 +56,7 @@ class PaymentService(StatefulService):
         amount: float = get_finite(event.payload, "amount", 0.0)
         if not loan_id or amount <= 0:
             return
-        payment_id: str = f"pay_{loan_id}_{int(datetime.now(timezone.utc).timestamp())}"
+        payment_id: str = f"pay_{loan_id}_{uuid.uuid4().hex[:12]}"
         receipt = {
             "loan_id": loan_id,
             "amount": amount,

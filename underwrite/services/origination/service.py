@@ -8,6 +8,7 @@ Emits ``origination.created`` when a new application is started and
 from __future__ import annotations
 
 import threading
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -50,7 +51,7 @@ class OriginationService(NanoService):
         if not borrower or principal <= 0:
             logger.warning("dropping ORIGINATION_CREATE with missing borrower or principal")
             return
-        application_id: str = f"app_{borrower}_{int(datetime.now(timezone.utc).timestamp())}"
+        application_id: str = f"app_{borrower}_{uuid.uuid4().hex[:12]}"
         app_record = {
             "borrower": borrower,
             "principal": principal,

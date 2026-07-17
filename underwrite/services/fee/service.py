@@ -8,6 +8,7 @@ Emits fee.assessed when a fee is applied to a loan.
 from __future__ import annotations
 
 import math
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -99,7 +100,7 @@ class FeeService(StatefulService):
                 logger.debug("zero/negative fee amount %s for loan %s, skipped", amount, loan_id)
                 return
 
-            fee_id: str = f"fee_{loan_id}_{fee_type}_{int(datetime.now(timezone.utc).timestamp())}"
+            fee_id: str = f"fee_{loan_id}_{fee_type}_{uuid.uuid4().hex[:12]}"
             fee_record = {
                 "fee_id": fee_id,
                 "loan_id": loan_id,

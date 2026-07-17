@@ -7,6 +7,7 @@ Protection Act 2023.
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -61,7 +62,7 @@ class DataSubjectRightsService(StatefulService):
         if not user_id or request_type not in ("access", "correction", "erasure"):
             logger.warning("dsr.request missing or invalid fields")
             return
-        request_id = f"dsr_{user_id}_{int(datetime.now(timezone.utc).timestamp())}"
+        request_id = f"dsr_{user_id}_{uuid.uuid4().hex[:12]}"
         now = datetime.now(timezone.utc)
         with self.state_lock:
             self.__requests[request_id] = {
@@ -101,7 +102,7 @@ class DataSubjectRightsService(StatefulService):
         if not user_id or not subject:
             logger.warning("grievance.logged missing user_id or subject")
             return
-        grievance_id = f"gr_{user_id}_{int(datetime.now(timezone.utc).timestamp())}"
+        grievance_id = f"gr_{user_id}_{uuid.uuid4().hex[:12]}"
         now = datetime.now(timezone.utc)
         with self.state_lock:
             self.__grievances[grievance_id] = {

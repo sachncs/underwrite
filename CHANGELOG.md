@@ -224,6 +224,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   with pre-seeded fake CIBIL data. The service now raises
   `RuntimeError` unless `allow_mock=True` is explicitly passed
   (intended for tests only).
+- **Second-precision ID collisions across services** — fee, DSR,
+  payment, and origination services generated IDs of the form
+  ``{prefix}_{user}_{int(timestamp)}`` which collided for any two
+  events in the same second for the same user. Replace the
+  timestamp suffix with a 12-character hex UUID; collision-free
+  even under burst load.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries
