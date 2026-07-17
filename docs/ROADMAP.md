@@ -4,20 +4,44 @@ Based on `TODO.md` (production readiness score: 57/100) and codebase analysis.
 
 ---
 
-## Short-term — v0.2.0 — Indian Regulatory Compliance (2 weeks)
+## v0.9 — hardening + real KYC integrations (landed)
+
+The v0.9 release line replaces the protocol-stub KYC providers
+with full wire-protocol clients (Karza-style / UIDAI KUA / CIBIL
+partner / CERSAI), the production Dockerfile ships a multi-stage
+build with non-root user and healthcheck, and the docs / changelog
+reflect the hardened state. See `CHANGELOG.md` for the full
+list of fixes.
+
+- Real PAN verification client (`services/kyc_providers/pan.py`)
+- Real Aadhaar eKYC client (`services/kyc_providers/aadhaar.py`)
+- Real CIBIL consumer bureau pull (`services/kyc_providers/cibil.py`)
+- Real CKYC registry search (`services/kyc_providers/ckyc.py`)
+- Common `KycProvider` ABC + `Verdict` enum + `ProviderResult`
+  envelope (`services/kyc_providers/base.py`)
+- Runtime auto-wires the configured providers into the
+  compliance and credit-bureau services
+- Production Dockerfile (`Dockerfile`) — multi-stage, non-root,
+  healthcheck, OCI labels, build args
+- Docker image CI workflow (`.github/workflows/docker.yml`)
+- `scripts/build-image.sh` — local build helper
+
+---
+
+## Short-term — v1.0 — production hardening (4 weeks)
 
 | Priority | Item | Est. |
 |----------|------|------|
-| Critical | Real PAN verification API integration (NSDL/ITD) | 2d |
-| Critical | Real Aadhaar verification API integration (UIDAI) | 2d |
-| Critical | Real CIBIL credit report API integration | 2d |
-| High | Real-time AML screening integration (OFSAC/UNSC/domestic blocklist) | 2d |
-| High | KFS template generation (Hindi + English per RBI DLG) | 2d |
-| High | E-mandate / e-NACH integration with Razorpay | 2d |
-| High | Video KYC provider integration (e.g., Digilocker, NSDL) | 3d |
-| Medium | Grievance portal webhook integration | 1d |
-| Medium | Breach notification template (DPDPA Section 8) | 1d |
-| Medium | Data retention batch auto-purge job | 2d |
+| Critical | Run the v0.9 image against a real KYC sandbox end-to-end | 1w |
+| Critical | Pin partner sandbox URLs and capture operator documentation | 2d |
+| Critical | Wire Razorpay e-NACH / UPI Autopay mandate collection | 3d |
+| High | Add provider sandbox tests in CI (mock the partner sandbox) | 2d |
+| High | Helm chart for the runtime + Postgres + Vault + OTLP | 3d |
+| High | Pre-built multi-arch (amd64 + arm64) images | 2d |
+| High | Playbook for on-call (incident response, key rotation, DLQ replay) | 1d |
+| Medium | Read-only `underwrite` role for `psql`/Vault operations | 1d |
+| Medium | OpenAPI 3.1 spec generated from the FastAPI surface | 2d |
+| Low | Helm chart integration tests (kind cluster in CI) | 3d |
 
 ## Medium-term — v0.3.0 (~2 weeks)
 

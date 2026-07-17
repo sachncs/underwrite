@@ -21,13 +21,21 @@ services:
       - UNDERWRITE_METRICS_ENABLED=true
       - UNDERWRITE_TRACING_ENABLED=true
       - UNDERWRITE_TRACING_EXPORTER=otlp
+      - UNDERWRITE_OTLP_ENDPOINT=http://otlp-collector:4317
       - UNDERWRITE_SECRETS_BACKEND=vault
       - UNDERWRITE_SECRETS_VAULT_URL=http://vault:8200
       - UNDERWRITE_SECRETS_VAULT_TOKEN=${VAULT_TOKEN:-devroot}
       - UNDERWRITE_SAGA_ENABLED=true
       - UNDERWRITE_DATA_DIR=/data
       - UNDERWRITE_API_TOKEN=${UNDERWRITE_API_TOKEN:-}
+      - UNDERWRITE_REQUIRE_AUTH=${UNDERWRITE_REQUIRE_AUTH:-true}
       - UNDERWRITE_AUTHZ_ENABLED=true
+      # KYC provider secrets — pulled from Vault in production.
+      # In sandbox mode the clients use the public UAT endpoints.
+      - UNDERWRITE_PAN_PRODUCTION=${UNDERWRITE_PAN_PRODUCTION:-false}
+      - UNDERWRITE_AADHAAR_PRODUCTION=${UNDERWRITE_AADHAAR_PRODUCTION:-false}
+      - UNDERWRITE_CIBIL_PRODUCTION=${UNDERWRITE_CIBIL_PRODUCTION:-false}
+      - UNDERWRITE_CKYC_PRODUCTION=${UNDERWRITE_CKYC_PRODUCTION:-false}
     volumes:
       - underwrite_data:/data
     command: ["serve", "--host", "0.0.0.0", "--port", "8080", "--services", "mechanism,audit,risk,fraud,compliance,consent,kfs,pricing,recovery,credit_bureau,dsr,governance,npa,collection,servicing,payment,fee,notification,origination,underwriter,disbursement,settlement"]

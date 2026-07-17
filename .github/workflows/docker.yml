@@ -1,0 +1,100 @@
+name: Docker image
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to build"
+        required: true
+        default: "dev"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract version
+        id: meta
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          elif [[ -n "${INPUT_TAG:-}" ]]; then
+            VERSION="${INPUT_TAG}"
+          else
+            VERSION="dev"
+          fi
+          echo "VERSION=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "GIT_SHA=${GITHUB_SHA::12}" >> "${GITHUB_OUTPUT}"
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_OUTPUT}"
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          tags: |
+            underwrite:${{ steps.meta.outputs.VERSION }}
+            underwrite:sha-${{ steps.meta.outputs.GIT_SHA }}
+          build-args: |
+            BUILD_VERSION=${{ steps.meta.outputs.VERSION }}
+            GIT_COMMIT=${{ steps.meta.outputs.GIT_SHA }}
+            BUILD_DATE=${{ steps.meta.outputs.BUILD_DATE }}
+            PYTHON_VERSION=${{ matrix.python-version }}
+            EXTRAS=serve,postgres,otlp,vault
+          provenance: false
+          sbom: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test image
+        run: |
+          docker run --rm -d --name underwrite-smoke \
+              -p 8080:8080 \
+              -e UNDERWRITE_REQUIRE_AUTH=false \
+              -e UNDERWRITE_DATA_DIR=/tmp/uw-data \
+              underwrite:sha-${{ steps.meta.outputs.GIT_SHA }}
+          sleep 5
+          curl -sf http://127.0.0.1:8080/healthz || { docker logs underwrite-smoke; exit 1; }
+          docker stop underwrite-smoke
+
+      - name: Smoke test CLI
+        run: |
+          docker run --rm --entrypoint underwrite \
+              underwrite:sha-${{ steps.meta.outputs.GIT_SHA }} \
+              --help
+
+      - name: Push to registry
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.VERSION }}
+            ghcr.io/${{ github.repository }}:latest
+          build-args: |
+            BUILD_VERSION=${{ steps.meta.outputs.VERSION }}
+            GIT_COMMIT=${{ steps.meta.outputs.GIT_SHA }}
+            BUILD_DATE=${{ steps.meta.outputs.BUILD_DATE }}
+            PYTHON_VERSION=${{ matrix.python-version }}
+            EXTRAS=serve,postgres,otlp,vault
+          provenance: false
+          sbom: false

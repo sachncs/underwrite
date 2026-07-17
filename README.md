@@ -24,8 +24,8 @@
 
 ## Status
 
-This is the v0.9 release line. Security and correctness fixes from the
-hardening pass:
+This is the v0.9 release line. Security and correctness fixes from
+the hardening pass:
 
 - Ed25519 event signatures bind the source and enforce a 5-minute
   replay window; private keys persist through the configured
@@ -42,17 +42,26 @@ hardening pass:
   fallback for unknown years.
 - KFS APR math, pricing EMI, NPA thresholds, and the
   underwriter rule engine are all aligned with RBI norms.
+- **Real KYC provider integrations** — PAN (NSDL/ITD), Aadhaar
+  (UIDAI KUA), CIBIL, and CKYC have full wire-protocol clients
+  in `services/kyc_providers/`. They are wired into the compliance
+  and credit-bureau services and configured via
+  `Configuration.kyc_providers`.
+- **Production Docker image** — multi-stage build, non-root
+  user, healthcheck, OCI labels, Buildx + GitHub Actions
+  workflow. Build with `./scripts/build-image.sh` or
+  `docker build -t underwrite:dev .`.
+- **CI matrix 3.10-3.13**, coverage gate 80%, ruff format check,
+  TruffleHog secret scan, mypy / bandit / pip-audit.
 
 Remaining work to reach v1.0:
 
-- Real API integrations for PAN (NSDL/ITD), Aadhaar (UIDAI), CKYC,
-  CIBIL, and AML blocklists are still stubbed — the framework is
-  in place but the production credentials are not.
-- Video KYC provider integration is not yet implemented.
-- e-NACH / UPI Autopay mandate collection is stubbed at the
-  protocol level (Razorpay integration skeleton is in place).
-- No Helm charts, no pre-built Docker images, manual service
-  wiring still required for multi-process deployments.
+- Video KYC provider integration (Digilocker, NSDL).
+- Helm chart for k8s deployment.
+- Pre-built multi-arch (amd64 + arm64) images.
+- Read-only `underwrite` role for `psql` / Vault operations.
+- Production runbook for on-call (incident response, key
+  rotation, DLQ replay).
 
 ## Installation
 

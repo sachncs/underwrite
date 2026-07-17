@@ -403,6 +403,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   can read client secrets by canonical key
   (`underwrite/pan/client_id`, `underwrite/aadhaar/kua_id`,
   etc.) without hard-coding the loader semantics.
+- **Dead infrastructure removed in the cleanup pass**:
+  `Identity.attest`, `KeyRotationManager`, and
+  `IdempotencyError` were unused in production code. Removed
+  from `__identity__.py`, `__exceptions__.py`, and
+  `tests/test_identity_extras.py` (deleted). Operator-driven
+  rotation is now documented in `docs/SECURITY.md` using
+  `AccessControl.trust()` and the replay window. All affected
+  docs updated.
+- **`Configuration.__merge` was a hand-rolled Pydantic
+  replacement** — ~100 lines of bespoke per-section copy /
+  validate / raise code. Replaced with a single
+  `overlay_section` helper that uses
+  `model_validate({**base_dump, **overrides})` for every
+  section. Adding a new section now means adding one line to
+  a mapping instead of duplicating five lines of bespoke logic.
+- **Production Docker image**: `Dockerfile` is now a proper
+  multi-stage build with a non-root user, OCI labels, build
+  args for version / commit / build date, a `HEALTHCHECK`
+  that pings `/healthz`, and a stripped `.so` runtime. CI
+  workflow `.github/workflows/docker.yml` builds and smoke-
+  tests the image on every push and on every tag. Local
+  helper `scripts/build-image.sh`. `docker-compose.yml` adds
+  the KYC production-mode env vars. `docs/DOCKER.md`
+  documents the build / run / deploy workflow.
+- **New docs**: `docs/KYC_INTEGRATIONS.md` documents the four
+  KYC provider wire protocols, common surface, configuration,
+  and sandbox vs production; `docs/ROADMAP.md` updated to
+  mark the v0.9 items complete.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries
