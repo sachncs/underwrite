@@ -286,6 +286,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `ruff format --check` so a non-formatted file fails CI; add a
   TruffleHog secret-scan job so committed secrets are caught
   before they land.
+- **OTLP span exporter had no TLS/auth options** — the exporter
+  was hard-coded to plaintext `http://localhost:4317` with no
+  way to add auth headers. Add `insecure` and `headers` parameters
+  and reject `http://` endpoints when `insecure=False` so
+  production deployments cannot accidentally ship span data in
+  cleartext.
+- **ModalBus poll loop spun at 100% CPU during burst traffic** —
+  the loop called `queue.get(block=False)` in a tight inner loop
+  and only slept *after* the queue drained, so under load the
+  poll interval was never honoured. Move the sleep to the top of
+  each iteration.
+- **`SERVICE_NAMES` was duplicated in `__config__` and the
+  service registry** — adding a new service meant editing two
+  files; one had drifted out of sync. `SERVICE_NAMES` is now
+  derived from the registry's `SERVICE_CLASSES` keys, which is
+  the single source of truth.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

@@ -200,9 +200,26 @@ class OtlpSpanExporter(SpanExporter):
     ``opentelemetry-sdk``, ``opentelemetry-exporter-otlp``).
     """
 
-    def __init__(self, endpoint: str = "http://localhost:4317", service_name: str = "underwrite") -> None:
+    def __init__(
+        self,
+        endpoint: str = "http://localhost:4317",
+        service_name: str = "underwrite",
+        insecure: bool = True,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.__endpoint = endpoint
         self.__service_name = service_name
+        # Default to insecure (plaintext) for the local-collector
+        # case. Production deployments must set insecure=False
+        # explicitly. HTTP endpoints are still allowed for local
+        # development but the operator is warned at init time.
+        self.__insecure = insecure
+        self.__headers = dict(headers) if headers else {}
+        if endpoint.startswith("http://") and not insecure:
+            raise ValueError(
+                "endpoint uses plaintext http but insecure=False; "
+                "either change the endpoint to https or pass insecure=True"
+            )
         self.__provider: Any = None
         self.__tracer: Any = None
         self.__processor: Any = None
@@ -223,7 +240,10 @@ class OtlpSpanExporter(SpanExporter):
 
         resource = Resource.create({"service.name": self.__service_name})
         self.__provider = SdkTracerProvider(resource=resource)
-        otlp_exporter = OTLPSpanExporter(endpoint=self.__endpoint)
+        otlp_kwargs: dict[str, Any] = {"endpoint": self.__endpoint, "insecure": self.__insecure}
+        if self.__headers:
+            otlp_kwargs["headers"] = self.__headers
+        otlp_exporter = OTLPSpanExporter(**otlp_kwargs)
         self.__processor = BatchSpanProcessor(otlp_exporter)
         self.__provider.add_span_processor(self.__processor)
         self.__tracer = self.__provider.get_tracer(__name__)

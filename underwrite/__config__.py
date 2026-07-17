@@ -665,39 +665,16 @@ class Configuration(ForbidExtra):
         return config
 
 
-SERVICE_NAMES: list[str] = [
-    "mechanism",
-    "audit",
-    "quote",
-    "risk",
-    "fraud",
-    "compliance",
-    "npa",
-    "collateral",
-    "recovery",
-    "governance",
-    "graph",
-    "identity",
-    "notification",
-    "reporting",
-    "underwriter",
-    "pricing",
-    "document",
-    "disbursement",
-    "collection",
-    "settlement",
-    "origination",
-    "servicing",
-    "payment",
-    "communication",
-    "workflow",
-    "decision",
-    "fee",
-    "statement",
-    "prepayment",
-    "kfs",
-    "razorpay",
-    "credit_bureau",
-    "consent",
-    "dsr",
-]
+def _build_service_names() -> list[str]:
+    """Build the canonical service name list from the registry.
+
+    The registry is the single source of truth — config used to
+    duplicate the list which drifted out of sync. This helper
+    produces the same ordering as the registry.
+    """
+    from underwrite.__service_registry__ import SERVICE_CLASSES
+
+    return list(SERVICE_CLASSES.keys())
+
+
+SERVICE_NAMES: list[str] = _build_service_names()

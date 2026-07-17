@@ -106,6 +106,13 @@ class ModalBus(EventBus):
                 if self.__modal_queue is None:
                     time.sleep(self.__poll_interval)
                     continue
+                # Sleep at the top of each poll iteration so the
+                # interval is honoured even when the queue is
+                # non-empty; without this the loop spins at 100%
+                # CPU draining bursts.
+                time.sleep(self.__poll_interval)
+                if not self.__running:
+                    break
                 raw = self.__modal_queue.get(block=False)
                 while raw is not None and self.__running:
                     data: dict[str, Any] = json.loads(raw)
@@ -117,8 +124,6 @@ class ModalBus(EventBus):
             except Exception as exc:
                 if self.__running:
                     logger.warning("modal poll error: %s", exc)
-            if self.__running:
-                time.sleep(self.__poll_interval)
 
     def __dispatch(self, event: Event) -> None:
         with self.__lock:
