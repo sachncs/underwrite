@@ -131,6 +131,7 @@ class RetryPolicy:
         base_delay: float = 0.1,
         max_delay: float = 5.0,
         retryable_exceptions: tuple[type[Exception], ...] | None = None,
+        non_retryable_exceptions: tuple[type[Exception], ...] | None = None,
     ) -> None:
         """Initializes a retry policy with exponential backoff.
 
@@ -140,14 +141,36 @@ class RetryPolicy:
             max_delay: Maximum delay cap in seconds.
             retryable_exceptions: Exception types that trigger retry.
                 Defaults to ``(Exception,)`` (all exceptions).
+            non_retryable_exceptions: Exception types that are
+                re-raised immediately without retry. Defaults to
+                ``(TypeError, ValueError, KeyError, AttributeError,
+                NameError, IndexError)`` so that programmer errors
+                are not silently retried.
         """
         self.__max_retries: int = max_retries
         self.__base_delay: float = base_delay
         self.__max_delay: float = max_delay
         self.__retryable_exceptions: tuple[type[Exception], ...] = retryable_exceptions or (Exception,)
+        self.__non_retryable_exceptions: tuple[type[Exception], ...] = non_retryable_exceptions or (
+            TypeError,
+            ValueError,
+            KeyError,
+            AttributeError,
+            NameError,
+            IndexError,
+        )
+        self.__rng: secrets.SystemRandom = secrets.SystemRandom()
 
     def execute(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Executes a callable with exponential-backoff retry.
+
+        An exception is retried iff it is a subclass of
+        ``retryable_exceptions`` AND not a subclass of
+        ``non_retryable_exceptions``. This lets callers exclude
+        programmer errors (TypeError, ValueError, KeyError,
+        AttributeError, NameError, IndexError) from the default
+        retry set while still allowing them to opt in by listing
+        them in ``retryable_exceptions``.
 
         Args:
             fn: The callable to execute.
@@ -164,10 +187,16 @@ class RetryPolicy:
         for attempt in range(self.__max_retries + 1):
             try:
                 return fn(*args, **kwargs)
-            except self.__retryable_exceptions as exc:
+            except BaseException as exc:
+                if not isinstance(exc, self.__retryable_exceptions):
+                    raise
+                if isinstance(exc, self.__non_retryable_exceptions) and not any(
+                    issubclass(t, type(exc)) for t in self.__retryable_exceptions
+                ):
+                    raise
                 last_exc = exc
                 if attempt < self.__max_retries:
-                    jitter = secrets.SystemRandom().uniform(0, 0.05)
+                    jitter = self.__rng.uniform(0, 0.05)
                     delay = min(self.__base_delay * (2**attempt) + jitter, self.__max_delay)
                     time.sleep(delay)
         if last_exc is not None:

@@ -366,7 +366,21 @@ class PostgresStore(Store):
             recovery_timeout=15.0,
             name="postgres",
         )
-        self.__retry: RetryPolicy = RetryPolicy(max_retries=2, base_delay=0.05)
+        retryable: tuple[type[BaseException], ...] = (
+            ConnectionResetError,
+            TimeoutError,
+        )
+        try:
+            import psycopg2 as _psycopg2
+
+            retryable = retryable + (_psycopg2.OperationalError, _psycopg2.InterfaceError)
+        except ImportError:
+            pass
+        self.__retry: RetryPolicy = RetryPolicy(
+            max_retries=2,
+            base_delay=0.05,
+            retryable_exceptions=retryable,
+        )
         self.__lock: threading.Lock = threading.Lock()
         self.__sql_get: str = self._build_sql("SELECT value FROM {} WHERE key = %s", table)
         self.__sql_set: str = self._build_sql(

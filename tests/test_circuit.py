@@ -77,13 +77,14 @@ class TestRetryPolicy:
         assert result == "ok"
 
     def test_retries_on_failure(self) -> None:
-        rp = RetryPolicy(max_retries=3, base_delay=0.001)
+        """ConnectionResetError is treated as transient and retried."""
+        rp = RetryPolicy(max_retries=3, base_delay=0.001, retryable_exceptions=(ConnectionResetError,))
         calls: list = []
 
         def flaky() -> str:
             calls.append(1)
             if len(calls) < 3:
-                raise ValueError("not yet")
+                raise ConnectionResetError("not yet")
             return "ok"
 
         result = rp.execute(flaky)
@@ -91,11 +92,13 @@ class TestRetryPolicy:
         assert len(calls) == 3
 
     def test_exhausts_retries(self) -> None:
-        rp = RetryPolicy(max_retries=2, base_delay=0.001)
-        with pytest.raises(ValueError):
-            rp.execute(lambda: (_ for _ in ()).throw(ValueError("always")))
+        rp = RetryPolicy(max_retries=2, base_delay=0.001, retryable_exceptions=(ConnectionResetError,))
+        with pytest.raises(ConnectionResetError):
+            rp.execute(lambda: (_ for _ in ()).throw(ConnectionResetError("always")))
 
     def test_non_retryable_exception_not_retried(self) -> None:
+        """TypeError is a programmer error; never retried even when
+        the caller did not list it in retryable_exceptions."""
         rp = RetryPolicy(max_retries=3, base_delay=0.001, retryable_exceptions=(ValueError,))
         calls: list = []
         with pytest.raises(TypeError):

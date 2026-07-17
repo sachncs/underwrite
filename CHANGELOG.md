@@ -230,6 +230,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   events in the same second for the same user. Replace the
   timestamp suffix with a 12-character hex UUID; collision-free
   even under burst load.
+- **PostgresStore retried programmer errors 3× with backoff** —
+  `RetryPolicy.execute` retried any `Exception` including
+  TypeError/ValueError from a non-JSON-serializable value, wasting
+  ~1.5s before crashing. Add a `non_retryable_exceptions` parameter
+  defaulting to programmer-error types; callers must opt in by
+  listing them in `retryable_exceptions` to retry them. PostgresStore
+  now retries only on `OperationalError`, `InterfaceError`,
+  `ConnectionResetError`, `TimeoutError`.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries
