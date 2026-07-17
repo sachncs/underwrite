@@ -31,7 +31,7 @@ For production deployments, this is a core dependency and is always installed. T
 **Root cause**: The emitting service signed the event with a private key whose corresponding public key does not match the `source_key` in the event envelope. This happens when:
 - A service was restarted and regenerated its Ed25519 keypair (`Identity.create()` generates a fresh key each call).
 - The `source_key` in the event metadata was tampered with or misconfigured.
-- Key rotation occurred mid-flight and the verifier does not have the old key in its grace period window (see `KeyRotationManager.verify_with_rotation()`).
+- Key rotation occurred mid-flight and the verifier does not have the old key in its trust set. Configure a longer `AccessControl.set_replay_window(...)` so recent signatures keep verifying during rotation.
 
 **Diagnostic steps**:
 1. Check the event's `source` and `source_key` fields:
@@ -44,7 +44,9 @@ For production deployments, this is a core dependency and is always installed. T
 
 **Resolution**:
 - If keys were regenerated, re-register the new public key via the identity service or update `AccessControl.__trusted_keys`.
-- If using `KeyRotationManager`, ensure the grace period (`identity.key_grace`, default 3600s) is long enough for in-flight events.
+- For in-flight signatures during a key rotation, set
+  `AccessControl.set_replay_window(...)` long enough to cover the
+  expected signature lifetime.
 - For testing, pass the same `private_key_pem` to `Identity.create()` on every start, or persist the key material to a secrets backend.
 
 ---

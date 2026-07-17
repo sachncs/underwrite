@@ -94,13 +94,6 @@ class TestIdentity:
         sig: str = identity.sign(payload)
         assert identity.verify(payload + "x", sig) is False
 
-    def test_attest_adds_provenance(self) -> None:
-        identity: Identity = Identity.create("attestor")
-        tx: dict[str, Any] = {"action": "add_seed", "user": "bank"}
-        attested: dict[str, Any] = identity.attest(tx)
-        assert attested["attested_by"] == "attestor"
-        assert attested["attested_sig"] != ""
-
     def test_unique_keys_per_service(self) -> None:
         id1: Identity = Identity.create("svc1")
         id2: Identity = Identity.create("svc2")

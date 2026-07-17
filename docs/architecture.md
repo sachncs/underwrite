@@ -173,7 +173,7 @@ Every emitted event is Ed25519-signed by the source service's `Identity`:
 1. `NanoService.emit()` creates the event, serializes the payload, signs with `self.__identity.sign(to_sign)`
 2. Downstream `__dispatch()` calls `self.__authz.assert_verified(event)` to verify the signature
 3. `AccessControl` evaluates allow/deny policies (default-deny) for publish and subscribe operations
-4. `KeyRotationManager` handles automatic key rotation with configurable TTL and grace period
+4. Ed25519 keys are rotated manually by generating a new `Identity.create(...)` and updating the runtime; rely on `AccessControl.set_replay_window(...)` to keep recent signatures verifiable
 
 ## Resilience
 

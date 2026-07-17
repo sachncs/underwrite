@@ -25,7 +25,7 @@ underwrite/                          # Main package (29 source modules + 28 serv
 ├── __cli__.py                      # Typer CLI: underwrite init/run/list/identity/health/dlq/
 │                                   #   metrics/serve/migrate
 ├── __identity__.py                 # Ed25519 key management: Identity (create/sign/verify/attest),
-│                                   #   KeyRotationManager with TTL and grace period
+│                                   #   Ed25519 Identity.sign / verify
 ├── __tracer__.py                   # Distributed tracing: Tracer, Span, SpanContext,
 │                                   #   ConsoleSpanExporter, OtlpSpanExporter
 ├── __metrics__.py                  # In-memory metrics: MetricsCollector with counters, timers,

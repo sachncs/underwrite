@@ -2,8 +2,8 @@
 
 Tests run multiple threads concurrently to expose data races in:
 - MechanismService state mutations
-- KeyRotationManager rotation
 - LocalBus publish/dispatch
+- SagaOrchestrator concurrent execution
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ import threading
 
 from underwrite.__bus__ import LocalBus
 from underwrite.__events__ import Event
-from underwrite.__identity__ import KeyRotationManager
 from underwrite.__store__ import MemoryStore
 
 
@@ -72,51 +71,6 @@ class TestLocalBusConcurrency:
         for t in threads:
             t.join(timeout=10)
         assert cb.state("svc1") in ("closed", "open", "half_open")
-
-
-class TestKeyRotationManagerConcurrency:
-    """Verify KeyRotationManager thread safety under concurrent rotation."""
-
-    def test_concurrent_get_or_create_returns_consistent_identity(self) -> None:
-        krm = KeyRotationManager(ttl_seconds=99999)
-        results: list[str] = []
-
-        def get_id() -> None:
-            identity = krm.get_or_create("svc1")
-            results.append(identity.public_key)
-
-        threads = [threading.Thread(target=get_id) for _ in range(20)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=10)
-        # All should see the same key (no double-rotation)
-        assert len(set(results)) == 1
-
-    def test_concurrent_rotate_does_not_lose_keys(self) -> None:
-        krm = KeyRotationManager(ttl_seconds=99999)
-        initial = krm.get_or_create("svc1")
-
-        def rotate() -> None:
-            krm.rotate("svc1")
-
-        threads = [threading.Thread(target=rotate) for _ in range(10)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=10)
-        current = krm.get_or_create("svc1")
-        assert current.public_key != initial.public_key
-
-    def test_verify_recent_key_still_works(self) -> None:
-        krm = KeyRotationManager(ttl_seconds=99999, grace_period=99999)
-        identity = krm.get_or_create("svc2")
-        payload = "test-payload"
-        sig = identity.sign(payload)
-        assert krm.verify_with_rotation(payload, sig, "svc2", identity.public_key)
-        # After rotation, old key should still verify during grace
-        krm.rotate("svc2")
-        assert krm.verify_with_rotation(payload, sig, "svc2", identity.public_key)
 
 
 class TestMechanismServiceConcurrency:

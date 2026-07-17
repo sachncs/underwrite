@@ -82,7 +82,7 @@ Every emitted event carries an Ed25519 signature:
 3. The signature and `source_key` (public key) are embedded in the `Event` envelope.
 4. On delivery, `AccessControl.assert_verified()` verifies the signature against the trusted key for `event.source` (`underwrite/__authz__.py:207`).
 5. ACL policies control which services may publish/subscribe to which event types.
-6. Keys can be rotated automatically via `KeyRotationManager` with a configurable TTL and grace period.
+6. Keys are rotated manually by generating a new `Identity.create(...)` and updating the runtime; rely on `AccessControl.set_replay_window(...)` to keep recent signatures verifiable.
 
 ---
 

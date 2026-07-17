@@ -179,8 +179,7 @@ UnderwriteError
 ├── RateLimitError
 ├── MigrationError
 ├── SagaError
-├── CircuitBreakerOpenError
-└── IdempotencyError
+└── CircuitBreakerOpenError
 ```
 
 ## Module Organization

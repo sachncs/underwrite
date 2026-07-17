@@ -144,15 +144,22 @@ memory.
 
 ### Key Rotation
 
-`KeyRotationManager` handles automatic rotation:
+The platform does not auto-rotate Ed25519 keys. Rotation is an
+operator-driven operation:
 
-| Parameter | Default | Description |
-|---|---|---|
-| `ttl_seconds` | `86400` (24h) | Key validity period before rotation |
-| `grace_period` | `3600` (1h) | Old key retained for in-flight verification |
+1.  Generate a new identity for the same service by running
+    `Identity.create(service_id + "_v2", secrets_manager=...)`.
+2.  Publish the new public key out-of-band to all subscribers.
+3.  Configure `AccessControl.set_replay_window(seconds)` to a value
+    longer than the maximum expected in-flight signature lifetime so
+    the replay window keeps recent signatures verifiable.
+4.  Update the runtime / service to use the new key.
+5.  Decommission the old identity once the replay window has passed.
 
-`verify_with_rotation()` checks both current and grace-period keys,
-ensuring events signed just before rotation are still verifiable.
+Subscribers should accept a previous `public_key` for at least as
+long as the replay window; `AccessControl.trust()` may be called
+multiple times per service id to register the new key without
+removing the old one.
 
 ---
 
@@ -370,7 +377,10 @@ flowchart TD
 - [ ] **Set an API token**: `UNDERWRITE_API_TOKEN` and `--require-auth`.
 - [ ] **Use Postgres backend**: FileStore and MemoryStore provide no
       access controls.
-- [ ] **Rotate signing keys**: Configure `KeyRotationManager` TTL.
+- [ ] **Rotate signing keys**: Generate a new `Identity.create(...)` for
+      the new rotation, update the runtime, and rely on
+      `AccessControl.set_replay_window(...)` to keep recent
+      signatures verifiable.
 - [ ] **Configure Vault/AWS SM**: Store private keys in a secrets
       backend, not env vars.
 - [ ] **Enable PII redaction**: Verify `PIISanitizer` is applied (audit

@@ -298,7 +298,7 @@ file_store = FileStore(
 ### Identity
 
 ```python
-from underwrite.__identity__ import Identity, KeyRotationManager
+from underwrite.__identity__ import Identity
 
 # Create
 identity = Identity.create("mechanism")
@@ -309,15 +309,9 @@ identity = Identity.create("mechanism", private_key_pem="...")
 sig = identity.sign("payload-string")
 ok  = identity.verify("payload-string", sig)     # → bool
 
-# Attest
-attested = identity.attest({"txn": "data"})
-# Returns {"txn": "data", "attested_by": "mechanism", "attested_key": "...", "attested_sig": "...", "attested_at": "..."}
-
-# Key Rotation Manager
-krm = KeyRotationManager(ttl_seconds=86400, grace_period=3600)
-ident = krm.get_or_create("mechanism")            # auto-rotate if TTL expired
-krm.rotate("mechanism")                            # force rotation
-ok = krm.verify_with_rotation(payload, sig, "mechanism", public_key)
+# Persist
+pem = identity.to_pem()                            # PEM-encoded private key
+identity.persist(secrets_manager)                  # store through backend
 ```
 
 ### AccessControl
@@ -478,7 +472,6 @@ from underwrite.__exceptions__ import (
     MigrationError,           # schema migration failure
     SagaError,                # saga step failure
     CircuitBreakerOpenError,  # circuit is open
-    IdempotencyError,         # idempotency check failure
 )
 ```
 

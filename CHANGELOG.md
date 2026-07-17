@@ -351,6 +351,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   etc. Switch to token-based matching that splits the key on
   non-alphanumeric boundaries and tests each token for set
   membership. New regression tests cover both directions.
+- **Dead infrastructure removed**: `Identity.attest`,
+  `KeyRotationManager`, and `IdempotencyError` were unused in
+  production but kept for backwards compatibility. Removed
+  from `__identity__.py`, `__exceptions__.py`, and
+  `tests/test_identity_extras.py` (deleted). `docs/SECURITY.md`
+  documents the new operator-driven rotation pattern using
+  `AccessControl.trust()` and the replay window. All affected
+  docs (FAQ, DEPENDENCIES, ARCHITECTURE, TROUBLESHOOTING, API,
+  ADR-003, DIRECTORY_STRUCTURE, CODE_STYLE) updated.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

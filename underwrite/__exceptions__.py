@@ -7,7 +7,6 @@ __all__ = [
     "BusError",
     "CircuitBreakerOpenError",
     "ConfigurationError",
-    "IdempotencyError",
     "IdentityError",
     "InfeasibleOperationError",
     "InvariantViolationError",
@@ -80,7 +79,3 @@ class SagaError(UnderwriteError):
 
 class CircuitBreakerOpenError(UnderwriteError):
     """Raised when a circuit breaker is in the open state."""
-
-
-class IdempotencyError(UnderwriteError):
-    """Raised when idempotency check fails."""

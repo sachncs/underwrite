@@ -13,7 +13,7 @@ These are declared in `[project.dependencies]` of `pyproject.toml` and are alway
 | Detail | Description |
 |--------|-------------|
 | **Purpose** | Ed25519 asymmetric key management, event signing, and signature verification. |
-| **Modules** | `underwrite/__identity__.py` — `Identity.create()`, `Identity.sign()`, `Identity.verify()`, `KeyRotationManager`; `underwrite/__authz__.py` — `AccessControl.verify_signature()` |
+| **Modules** | `underwrite/__identity__.py` — `Identity.create()`, `Identity.sign()`, `Identity.verify()`, `Identity.persist()`; `underwrite/__authz__.py` — `AccessControl.verify_signature()` |
 | **Upgrade considerations** | Ed25519 API is stable across 41.x–43.x. The `cryptography.hazmat.primitives.asymmetric.ed25519` module is used directly (not `SigningKey` from `nacl`). If upgrading past 43.x, check for deprecation of `BestAvailableEncryption` and `serialization` helpers. |
 
 ### typer >=0.12

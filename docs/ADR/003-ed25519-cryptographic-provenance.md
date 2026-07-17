@@ -6,7 +6,7 @@
 
 The `underwrite` platform certifies financial events (loan origination, disbursement, default occurrence, fee assessment). Regulatory audit requires non-repudiation — the emitter must not be able to deny having emitted an event. Events are also the unit of audit for the `AuditService` (`services/audit/service.py`), which maintains an append-only ledger.
 
-The signing infrastructure is in `__identity__.py` (Identity class, KeyRotationManager). Signature verification is in `__authz__.py` (`AccessControl.verify_signature()`). The signing scheme is defined at `services/base.py:132` where events are signed during `emit()`.
+The signing infrastructure is in `__identity__.py` (Identity class). Signature verification is in `__authz__.py` (`AccessControl.verify_signature()`). The signing scheme is defined at `services/base.py:132` where events are signed during `emit()`.
 
 ## Problem
 
@@ -36,10 +36,18 @@ Every emitted `Event` carries an Ed25519 signature computed by the emitting serv
 
 ### Key Rotation
 
-`KeyRotationManager` (`__identity__.py:166`) handles rotation:
-- **TTL**: 86,400 seconds (24 hours) by default
-- **Grace period**: 3,600 seconds (1 hour) — old keys remain accepted for verification during this window
-- `verify_with_rotation()` checks current key first, then falls back to the previous key if within the grace period
+Keys are not auto-rotated. The rotation pattern is operator-driven:
+
+1.  Generate a new `Identity.create(service_id + "_v2", secrets_manager=...)`.
+2.  Publish the new public key out-of-band.
+3.  `AccessControl.trust()` both keys during the transition window.
+4.  Update the runtime to use the new key.
+5.  Decommission the old identity once `AccessControl.set_replay_window(...)`
+    is exceeded.
+
+The replay window on signature verification is the operational
+analogue of the rotation grace period: events signed before the
+window expires continue to verify after the signing key changes.
 
 ### Key Storage
 
@@ -53,12 +61,14 @@ Private keys are stored in PEM format. When `encryption_passphrase` is provided,
 
 - **No signatures (trust all intra-process events)**: Fastest option (no ~100 µs signing/verification per event) but unacceptable for audit. Without signatures, the audit log contains events that could have been forged by any compromised service in the process.
 
+- **Auto-rotation via `KeyRotationManager`**: We considered an in-process key rotation manager that swaps keys after a TTL and retains the old key in a grace-period dict. Rejected because rotation is fundamentally a coordination problem between subscribers (who must learn the new key) and a runtime-only manager cannot reach them. The replay-window-based rotation pattern is operationally simpler and gives operators explicit control.
+
 ## Consequences
 
 ### Positive
 - Cryptographic provenance — every event can be independently verified against the emitter's public key, even after export from the system
 - Non-repudiation — the emitter cannot deny having emitted a signed event
-- Transparent rotation — `KeyRotationManager` keeps the system available during key transitions
+- Operator-controlled rotation — new keys are registered via `AccessControl.trust()` so subscribers are explicitly aware of the change
 
 ### Negative
 - Signing/verification overhead — ~100 µs per event. Acceptable for financial workloads where throughput is <10k events/s
