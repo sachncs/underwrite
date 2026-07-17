@@ -127,16 +127,50 @@ class PrometheusMiddleware:
 
     Attaches a ``/metrics-prometheus`` endpoint that returns the
     underwrite Runtime's internal metrics in Prometheus text format.
+
+    Authentication mirrors the ``/v1/publish`` token: a
+    ``UNDERWRITE_API_TOKEN`` value (or the ``api_token`` constructor
+    arg) must be configured and the request must carry
+    ``Authorization: Bearer <token>``. Operators are expected to
+    keep the metrics endpoint on a private network; the token is
+    a defence-in-depth check, not a substitute for network
+    isolation.
     """
 
-    def __init__(self, app: Any, runtime: Any) -> None:
+    def __init__(self, app: Any, runtime: Any, api_token: str = "") -> None:
         self.app = app
         self.runtime = runtime
+        import os
+
+        self._api_token: str = api_token or os.environ.get("UNDERWRITE_API_TOKEN", "")
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] == "http" and scope.get("path") == "/metrics-prometheus":
-            from fastapi.responses import PlainTextResponse
+            from fastapi.responses import JSONResponse, PlainTextResponse
 
+            if self._api_token:
+                import hmac
+
+                headers = scope.get("headers") or []
+                auth = ""
+                for header in headers:
+                    if len(header) < 2:
+                        continue
+                    k, v = header[0], header[1]
+                    if k == b"authorization" or k == "authorization":
+                        try:
+                            auth = v.decode("latin-1") if isinstance(v, bytes) else str(v)
+                        except Exception:
+                            auth = ""
+                        break
+                expected = f"Bearer {self._api_token}"
+                if not hmac.compare_digest(auth, expected):
+                    response = JSONResponse(
+                        {"error": "unauthorized"},
+                        status_code=401,
+                    )
+                    await response(scope, receive, send)
+                    return
             text = _exporter.to_prometheus_text(self.runtime)
             response = PlainTextResponse(text, media_type="text/plain; version=0.0.4")
             await response(scope, receive, send)

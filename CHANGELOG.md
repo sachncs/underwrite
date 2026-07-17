@@ -336,6 +336,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   success; failed dispatches stay in flight and are redelivered
   by SQS after the visibility timeout, with the
   `IdempotencyGuard` absorbing any duplicate.
+- **`/metrics-prometheus` had no authentication** — the endpoint
+  is intended for internal scrape jobs but was wide open. Add
+  bearer-token authentication that mirrors `/v1/publish`:
+  when `UNDERWRITE_API_TOKEN` is set (or `api_token` is passed
+  to `PrometheusMiddleware`), the endpoint requires
+  `Authorization: Bearer <token>`. When no token is configured
+  the endpoint is open (documented as acceptable for a private
+  scrape network). Regression tests cover 200/401/wrong-bearer
+  /no-token paths.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

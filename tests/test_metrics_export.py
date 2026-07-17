@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from underwrite.prometheus_export import MetricsExporter
+from underwrite.prometheus_export import MetricsExporter, PrometheusMiddleware
 
 
 def _mock_runtime(snapshot: dict) -> MagicMock:
@@ -62,3 +62,56 @@ class TestMetricsExporter:
         assert 'handle_duration_avg_ms{service="test"} 10.0' in text
         assert 'handle_duration_min_ms{service="test"} 2.0' in text
         assert 'handle_duration_max_ms{service="test"} 25.0' in text
+
+
+class TestPrometheusMiddlewareAuth:
+    @staticmethod
+    async def _run(mw, headers: list[tuple[bytes, bytes]]):
+        scope = {
+            "type": "http",
+            "path": "/metrics-prometheus",
+            "method": "GET",
+            "headers": headers,
+        }
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        sent: list[dict] = []
+
+        async def send(message):
+            sent.append(message)
+
+        await mw(scope, await receive(), send)
+        return sent
+
+    def test_unauthorized_without_bearer(self) -> None:
+        import asyncio
+
+        mw = PrometheusMiddleware(MagicMock(), MagicMock(), api_token="secret")
+        sent = asyncio.run(self._run(mw, []))
+        assert any(m.get("status") == 401 for m in sent), sent
+
+    def test_authorized_with_correct_bearer(self) -> None:
+        import asyncio
+
+        mw = PrometheusMiddleware(MagicMock(), MagicMock(), api_token="secret")
+        sent = asyncio.run(self._run(mw, [(b"authorization", b"Bearer secret")]))
+        assert any(m.get("status") == 200 for m in sent), sent
+
+    def test_rejects_wrong_bearer(self) -> None:
+        import asyncio
+
+        mw = PrometheusMiddleware(MagicMock(), MagicMock(), api_token="secret")
+        sent = asyncio.run(self._run(mw, [(b"authorization", b"Bearer wrong")]))
+        assert any(m.get("status") == 401 for m in sent), sent
+
+    def test_open_when_no_token_configured(self) -> None:
+        """No token configured means the endpoint is open; operators
+        are expected to keep the metrics endpoint on a private
+        network."""
+        import asyncio
+
+        mw = PrometheusMiddleware(MagicMock(), MagicMock())
+        sent = asyncio.run(self._run(mw, []))
+        assert any(m.get("status") == 200 for m in sent), sent
