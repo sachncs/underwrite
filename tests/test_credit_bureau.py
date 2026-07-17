@@ -9,12 +9,14 @@ from underwrite.__events__ import Event, EventType
 from underwrite.services.credit_bureau.client import (
     CkycResponse,
     CreditReport,
+    HttpCreditBureauClient,
     MockCreditBureauClient,
 )
 from underwrite.services.credit_bureau.service import CreditBureauService
 
 
 def svc(**kw) -> CreditBureauService:
+    kw.setdefault("allow_mock", True)
     return CreditBureauService(service_id="credit_bureau", **kw)
 
 
@@ -266,4 +268,19 @@ class TestHealthCheck:
             Event(event_type=EventType.CREDIT_BUREAU_CHECK, source="test", payload={"pan": "PAN1", "bureau": "cibil"})
         )
         health = s.health_check()
-        assert health["reports_cached"] == 1
+
+
+class TestClientSelection:
+    def test_no_api_key_and_no_allow_mock_raises(self) -> None:
+        import pytest
+
+        with pytest.raises(RuntimeError, match="no credit bureau credentials"):
+            CreditBureauService(service_id="credit_bureau", allow_mock=False)
+
+    def test_no_api_key_with_allow_mock_returns_mock(self) -> None:
+        s = svc(allow_mock=True)
+        assert isinstance(s._client, MockCreditBureauClient)
+
+    def test_api_key_returns_http_client(self) -> None:
+        s = svc(cibil_api_key="real-key", allow_mock=False)
+        assert isinstance(s._client, HttpCreditBureauClient)

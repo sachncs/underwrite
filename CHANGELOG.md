@@ -199,6 +199,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (or simply many service ids) could grow the dict forever.
   Add ``max_handlers`` (default 1000); the oldest handler bucket
   is evicted past the cap. New regression test covers the eviction.
+- **Collection on_repaid looked up the wrong key** — the store was
+  keyed by ``borrower`` (in on_loan_originated) but on_repaid
+  read ``user``, so every repayment was a silent no-op. Now reads
+  ``borrower`` (with a ``user`` fallback for backwards
+  compatibility).
+- **Fee service dedup substring match broke the cap check** —
+  `total_assessed` was a substring match `loan_id in fee_id`,
+  so loan `1` matched every fee containing `1`. Replace with a
+  field comparison `r["loan_id"] == loan_id`.
+- **Communication service emitted SENT without dispatching** —
+  every `communication.send` event emitted `communication.sent`
+  even when no delivery adapter ran, so downstream consumers
+  treated queued messages as delivered. Add `__dispatch_channel`
+  hook (default returns `queued`) and only emit SENT when the
+  adapter confirms delivery. The default base class records intent
+  with `delivery_status=queued`.
+- **Servicing `daily_rate` was always 0** — `LOAN_ORIGINATED`
+  did not include `annual_rate` so servicing accrued no interest.
+  Mechanism now reads `annual_rate` (defaulting to `protocol_rate`
+  if absent) and includes it in the emitted event.
+- **Credit bureau silently fell back to mock client without API
+  key** — production with a missing `cibil_api_key` would answer
+  with pre-seeded fake CIBIL data. The service now raises
+  `RuntimeError` unless `allow_mock=True` is explicitly passed
+  (intended for tests only).
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

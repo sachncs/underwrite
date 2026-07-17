@@ -99,18 +99,24 @@ class CollectionService(StatefulService):
     def on_repaid(self, event: Event) -> None:
         """Apply a repayment to the borrower's loan."""
         p = event.payload
-        user: str = get_non_empty(p, "user")
+        # The store is keyed by ``borrower`` (see on_loan_originated),
+        # so look up by the same key. The legacy ``user`` alias is
+        # accepted for backwards compatibility.
+        borrower: str = p.get("borrower", "") or p.get("user", "")
+        if not borrower:
+            logger.debug("repaid event missing borrower/user, ignored")
+            return
         delta: float = get_finite(p, "delta_earned")
         emit_data: dict[str, Any] | None = None
         with self.state_lock:
-            loan = self.__loans.get(user)
+            loan = self.__loans.get(borrower)
             if loan:
                 loan["paid"] += delta
                 if loan["paid"] >= loan["principal"]:
                     loan["status"] = "closed"
                 self.repo.save(self.__loans)
                 emit_data = {
-                    "borrower": user,
+                    "borrower": borrower,
                     "paid": round(loan["paid"], 2),
                     "remaining": round(loan["principal"] - loan["paid"], 2),
                     "status": loan["status"],

@@ -79,7 +79,7 @@ class FeeService(StatefulService):
             total_assessed = sum(
                 r.get("amount", 0.0)
                 for r in self.__fees.values()
-                if loan_id in r.get("fee_id", "") or loan_id in r.get("loan_id", "")
+                if r.get("loan_id", "") == loan_id
             )
             if total_assessed >= MAX_FEE_PER_LOAN:
                 logger.warning(

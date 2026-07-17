@@ -31,12 +31,15 @@ class CreditBureauService(StatefulService):
         """Initialize the credit bureau service with client and store.
 
         Args:
-            **kwargs: May include ``cibil_api_key``. Forwarded to
-                StatefulService.__init__.
+            **kwargs: May include ``cibil_api_key`` and ``allow_mock``.
+                Forwarded to StatefulService.__init__ except for the
+                client-only options which are consumed here.
 
         """
-        super().__init__(**kwargs)
-        self._client: CreditBureauClient = self.build_client(**kwargs)
+        client_kwargs = {k: v for k, v in kwargs.items() if k in ("cibil_api_key", "allow_mock")}
+        parent_kwargs = {k: v for k, v in kwargs.items() if k not in client_kwargs}
+        super().__init__(**parent_kwargs)
+        self._client: CreditBureauClient = self.build_client(**client_kwargs)
         self.reports: dict[str, CreditReport] = {}
         self.ckyc_records: dict[str, dict[str, Any]] = {}
         self.repo: TypedStoreRepository[dict[str, Any]] = self.store_repo("credit_bureau", dict)
@@ -85,18 +88,31 @@ class CreditBureauService(StatefulService):
         """Build the appropriate credit bureau client based on config.
 
         Args:
-            **kwargs: Configuration parameters including cibil_api_key.
+            **kwargs: Configuration parameters including cibil_api_key
+                and an optional ``allow_mock`` flag (defaults to False).
 
         Returns:
             An HttpCreditBureauClient if credentials are available,
-            otherwise a MockCreditBureauClient.
+            otherwise a MockCreditBureauClient (only when
+            ``allow_mock=True``).
 
+        Raises:
+            RuntimeError: If no API key is configured and
+                ``allow_mock`` is not explicitly set.
         """
         api_key = kwargs.get("cibil_api_key", "")
         if api_key:
             return HttpCreditBureauClient(cibil_api_key=api_key)
-        logger.info("no bureau credentials configured, using mock client")
-        return MockCreditBureauClient()
+        if kwargs.get("allow_mock", False):
+            logger.warning(
+                "no bureau credentials configured; using in-memory mock — "
+                "this must NEVER be set in production"
+            )
+            return MockCreditBureauClient()
+        raise RuntimeError(
+            "no credit bureau credentials configured; "
+            "set cibil_api_key or pass allow_mock=True for tests only"
+        )
 
     def handle(self, event: Event) -> None:
         """Process credit bureau and CKYC verification events.

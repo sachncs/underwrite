@@ -24,7 +24,10 @@ class TestCommunicationService:
         assert rec["recipient"] == "alice@test.com"
         assert rec["subject"] == "Welcome"
 
-    def test_send_emits_communication_sent(self) -> None:
+    def test_send_queues_when_no_delivery_adapter(self) -> None:
+        """Without a delivery adapter the service records intent but
+        does NOT emit COMMUNICATION_SENT — only confirmed deliveries
+        should be reported as SENT."""
         bus = LocalBus()
         received: list = []
         bus.subscribe("communication.sent", lambda e: received.append(e))
@@ -37,9 +40,11 @@ class TestCommunicationService:
                 payload={"recipient": "bob@test.com", "subject": "Alert", "body": "Risk"},
             )
         )
-        assert len(received) == 1
-        assert received[0].payload["recipient"] == "bob@test.com"
-        assert received[0].payload["channel"] == "email"
+        assert received == []
+        keys = svc.store.keys("message:msg_bob@test.com_")
+        assert len(keys) == 1
+        rec = svc.store.get(keys[0])
+        assert rec["delivery_status"] == "queued"
 
     def test_send_with_custom_channel(self) -> None:
         svc = CommunicationService(service_id="comm")

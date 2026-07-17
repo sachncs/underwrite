@@ -7,6 +7,7 @@ communication.sent on successful dispatch.
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -62,24 +63,60 @@ class CommunicationService(NanoService):
         if not recipient:
             logger.warning("dropping COMMUNICATION_SEND with missing recipient")
             return
-        message_id: str = f"msg_{recipient}_{int(datetime.now(timezone.utc).timestamp())}"
+        message_id: str = (
+            f"msg_{recipient}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}_"
+            f"{uuid.uuid4().hex[:8]}"
+        )
         msg = {
             "recipient": recipient,
             "subject": subject,
             "channel": channel,
             "sent_at": datetime.now(timezone.utc).isoformat(),
         }
-        self.store.set(f"message:{message_id}", msg)
-        self.emit(
-            EventType.COMMUNICATION_SENT,
-            {
-                "message_id": message_id,
-                "recipient": recipient,
-                "channel": channel,
-                "subject": subject,
-            },
-            correlation_id=event.correlation_id,
-        )
+        # Dispatch through the configured channel. The base class
+        # does not actually deliver mail/SMS; this service records
+        # intent and emits a SENT event only after a successful
+        # delivery attempt via __dispatch_channel. Without a
+        # delivery adapter the service is essentially a log of
+        # outbound communications; mark the message as
+        # queued rather than sent.
+        delivery_status = self.__dispatch_channel(channel, recipient, subject)
+        self.store.set(f"message:{message_id}", {**msg, "delivery_status": delivery_status})
+        if delivery_status == "sent":
+            self.emit(
+                EventType.COMMUNICATION_SENT,
+                {
+                    "message_id": message_id,
+                    "recipient": recipient,
+                    "channel": channel,
+                    "subject": subject,
+                },
+                correlation_id=event.correlation_id,
+            )
+        else:
+            logger.info(
+                "communication %s queued for %s via %s (status=%s)",
+                message_id,
+                recipient,
+                channel,
+                delivery_status,
+            )
+
+    def __dispatch_channel(self, channel: str, recipient: str, subject: str) -> str:
+        """Hook for actually delivering the message through a channel.
+
+        Subclasses or production deployments can override this to
+        integrate with an SMS/email provider. The base implementation
+        records the intent in the local store only — the message is
+        *queued*, not *sent*. Callers should not emit COMMUNICATION_SENT
+        for queued messages; downstream consumers may treat SENT as
+        proof of delivery.
+
+        Returns:
+            One of ``"sent"``, ``"queued"``, ``"unsupported"``, or
+            ``"failed"``.
+        """
+        return "queued"
 
     def __on_statement_generated(self, event: Event) -> None:
         """Record that a statement notification was sent.
