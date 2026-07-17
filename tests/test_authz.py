@@ -58,8 +58,6 @@ class TestAccessControl:
             source_key=identity.public_key,
             payload={},
         )
-        payload_str = json.dumps(event.payload, sort_keys=True, default=str)
-        to_sign = f"{event.event_id}:{event.timestamp}:{event.event_type}:{payload_str}"
         signed = Event(
             event_id=event.event_id,
             event_type=event.event_type,
@@ -68,7 +66,7 @@ class TestAccessControl:
             timestamp=event.timestamp,
             payload=event.payload,
             correlation_id=event.correlation_id,
-            signature=identity.sign(to_sign),
+            signature=identity.sign(event.canonical_sign_bytes().decode("utf-8")),
         )
         assert acl.verify_signature(signed) is True
 
@@ -83,7 +81,6 @@ class TestAccessControl:
             source_key=identity.public_key,
             payload={},
         )
-        to_sign = f"{event.event_id}:{event.timestamp}:{event.event_type}:{{}}"
         signed = Event(
             event_id=event.event_id,
             event_type=event.event_type,
@@ -92,7 +89,7 @@ class TestAccessControl:
             timestamp=event.timestamp,
             payload=event.payload,
             correlation_id=event.correlation_id,
-            signature=identity.sign(to_sign),
+            signature=identity.sign(event.canonical_sign_bytes().decode("utf-8")),
         )
         tampered = Event(
             event_id=signed.event_id,
@@ -115,8 +112,6 @@ class TestAccessControl:
             source="risk",
             source_key=identity.public_key,
         )
-        payload_str = json.dumps(event.payload, sort_keys=True, default=str)
-        to_sign = f"{event.event_id}:{event.timestamp}:{event.event_type}:{payload_str}"
         signed = Event(
             event_id=event.event_id,
             event_type=event.event_type,
@@ -125,7 +120,7 @@ class TestAccessControl:
             timestamp=event.timestamp,
             payload=event.payload,
             correlation_id=event.correlation_id,
-            signature=identity.sign(to_sign),
+            signature=identity.sign(event.canonical_sign_bytes().decode("utf-8")),
         )
         acl.assert_verified(signed)
 

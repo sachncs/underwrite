@@ -246,8 +246,6 @@ class NanoService(ABC):
             trace_id=trace_id,
             parent_span_id=parent_span_id,
         )
-        payload_str: str = json.dumps(payload, sort_keys=True)
-        to_sign: str = f"{event.event_id}:{event.timestamp}:{event.event_type}:{payload_str}"
         signed: Event = Event(
             event_id=event.event_id,
             event_type=event.event_type,
@@ -258,7 +256,7 @@ class NanoService(ABC):
             correlation_id=event.correlation_id,
             trace_id=event.trace_id,
             parent_span_id=event.parent_span_id,
-            signature=self.__identity.sign(to_sign),
+            signature=self.__identity.sign(event.canonical_sign_bytes().decode("utf-8")),
         )
         self.__bus.publish(signed)
         if self.__metrics:

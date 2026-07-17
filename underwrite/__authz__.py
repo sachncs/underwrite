@@ -8,12 +8,14 @@ from __future__ import annotations
 
 __all__ = [
     "AccessControl",
+    "DEFAULT_REPLAY_WINDOW_SECONDS",
     "Policy",
 ]
 
 import base64
 import json
 import threading
+from datetime import datetime, timezone
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -21,6 +23,8 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from underwrite.__events__ import Event
 from underwrite.__exceptions__ import AuthzError
 from underwrite.__logger__ import logger
+
+DEFAULT_REPLAY_WINDOW_SECONDS: float = 300.0
 
 
 class Policy:
@@ -78,6 +82,17 @@ class AccessControl:
         self.__lock: threading.Lock = threading.Lock()
         self.__policies: list[Policy] = []
         self.__trusted_keys: dict[str, str] = {}  # service_id -> public_key
+        self.__replay_window_seconds: float = DEFAULT_REPLAY_WINDOW_SECONDS
+
+    def set_replay_window(self, seconds: float) -> None:
+        """Sets the maximum age (in seconds) of a signed event for verification.
+
+        Events older than this window — or dated more than this far in the
+        future — are rejected. Set to ``0`` or a negative value to disable
+        the window check (not recommended in production).
+        """
+        with self.__lock:
+            self.__replay_window_seconds = max(0.0, float(seconds))
 
     def allow(self, subject: str, resource: str) -> None:
         """Grants a subject permission to access a resource.
@@ -155,26 +170,42 @@ class AccessControl:
     def verify_signature(self, event: Event) -> bool:
         """Verifies an event's Ed25519 signature against the issuer's trusted key.
 
-        When the ``cryptography`` library is not installed, all
-        signatures are accepted (insecure — for development only).
+        The signed payload binds the event id, timestamp, event type,
+        source and JSON-serialised payload, so a holder of one trusted
+        key cannot re-stamp an event under a different service id or
+        replay an old captured event outside the configured replay
+        window.
         """
         with self.__lock:
             public_key_b64 = self.__trusted_keys.get(event.source)
+            window = self.__replay_window_seconds
         if not public_key_b64:
+            return False
+        if window > 0 and not self._within_window(event.timestamp, window):
             return False
         try:
             public_bytes = base64.b64decode(public_key_b64)
             public_key = ed25519.Ed25519PublicKey.from_public_bytes(public_bytes)
-            payload_str = json.dumps(event.payload, sort_keys=True)
-            to_verify = f"{event.event_id}:{event.timestamp}:{event.event_type}:{payload_str}".encode()
             signature = base64.b64decode(event.signature)
-            public_key.verify(signature, to_verify)
+            public_key.verify(signature, event.canonical_sign_bytes())
             return True
         except InvalidSignature:
             return False
         except (TypeError, ValueError) as exc:
             logger.exception("unexpected error verifying signature on event %s: %s", event.event_id, exc)
             return False
+
+    @staticmethod
+    def _within_window(timestamp: str, window: float) -> bool:
+        try:
+            ts = datetime.fromisoformat(timestamp)
+        except (TypeError, ValueError):
+            return False
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        delta = (now - ts).total_seconds()
+        return -window <= delta <= window
 
     def assert_publish(self, subject: str, event_type: str) -> None:
         """Asserts a subject is allowed to publish an event type.

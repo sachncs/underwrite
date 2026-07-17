@@ -66,6 +66,20 @@ class Event:
             result[f.name] = getattr(self, f.name)
         return result
 
+    def canonical_sign_bytes(self) -> bytes:
+        """Returns the canonical byte sequence to sign/verify this event.
+
+        The payload is JSON-serialised with sorted keys so the signature
+        is stable across dict iteration order. The source is included so
+        an attacker holding one trusted key cannot re-stamp events under
+        another service id.
+        """
+        import json as _json
+
+        payload_str = _json.dumps(self.payload, sort_keys=True, default=str)
+        canonical = f"{self.event_id}|{self.timestamp}|{self.event_type}|{self.source}|{payload_str}"
+        return canonical.encode("utf-8")
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Event:
         known = {f.name for f in fields(cls)}

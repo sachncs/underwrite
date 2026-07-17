@@ -65,6 +65,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `Identity` for the `runtime` service, signs outbound events (binding
   event id, timestamp, type, source and payload), and registers its
   public key in the authz trust set.
+- **Ed25519 signatures did not bind `event.source` and had no replay
+  window** — the signed payload was `event_id:timestamp:event_type:payload`
+  and a captured event verified forever. The canonical signed bytes
+  (`Event.canonical_sign_bytes()`) now bind the source and the
+  `AccessControl` enforces a 5-minute clock window
+  (`AccessControl.set_replay_window` to override; set to 0 to disable).
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

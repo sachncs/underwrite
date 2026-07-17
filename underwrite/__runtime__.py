@@ -659,8 +659,7 @@ class Runtime:
             payload=payload,
             correlation_id=correlation_id or "",
         )
-        to_sign = f"{event.event_id}:{event.timestamp}:{event.event_type}:{event.source}:{json.dumps(event.payload, sort_keys=True)}"
-        signed = identity.sign(to_sign)
+        signed = identity.sign(event.canonical_sign_bytes().decode("utf-8"))
         object.__setattr__(event, "signature", signed)
         if self.__authz is not None:
             self.__authz.trust(identity.service_id, identity.public_key)
