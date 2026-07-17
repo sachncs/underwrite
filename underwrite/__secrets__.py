@@ -146,6 +146,20 @@ class SecretsManager:
         """Stores a PEM-encoded private key for *service_id*."""
         self.__backend.set(f"underwrite/{service_id}/private_key", pem)
 
+    def get(self, key: str) -> str | None:
+        """Loads a generic secret by *key*.
+
+        The key is passed through unchanged to the underlying
+        backend, so callers should use the canonical
+        ``underwrite/<provider>/<field>`` namespace (e.g.
+        ``underwrite/pan/client_id``).
+        """
+        return self.__backend.get(key)
+
+    def set(self, key: str, value: str) -> None:
+        """Stores a generic secret by *key*."""
+        self.__backend.set(key, value)
+
 
 __all__ = [
     "SecretsBackend",

@@ -151,14 +151,19 @@ class ComplianceService(StatefulService):
         """Initialize the compliance service with KYC records and AML blocklist.
 
         Args:
-            **kwargs: May include ``aml_blocklist_path``. Falls back to
-                ``AML_BLOCKLIST_PATH`` env var or ``aml_blocklist.json``.
-
+            **kwargs: May include ``aml_blocklist_path`` and
+                ``kyc_providers``. Falls back to ``AML_BLOCKLIST_PATH``
+                env var or ``aml_blocklist.json``. ``kyc_providers``
+                is a dict mapping ``pan`` / ``aadhaar`` / ``cibil`` /
+                ``ckyc`` to a ``KycProvider`` instance; when present,
+                real upstream verifications are run; when missing
+                the service falls back to format-only validation.
         """
         self.__aml_blocklist_path: str = kwargs.pop(
             "aml_blocklist_path",
             os.environ.get("AML_BLOCKLIST_PATH", BLOCKLIST_PATH),
         )
+        self.__kyc_providers: dict[str, Any] = kwargs.pop("kyc_providers", {})
         super().__init__(**kwargs)
         self.__blocklist: set[str] = load_blocklist(self.__aml_blocklist_path)
         self.__kyc_records: dict[str, dict[str, Any]] = {}
@@ -234,6 +239,39 @@ class ComplianceService(StatefulService):
             )
             return
 
+        # Real upstream PAN verification when a provider is
+        # configured. Without a provider, the format check above
+        # is the only KYC gate (the original v0.9 behaviour).
+        pan_verdict = "format_verified"
+        pan_provider_result: dict[str, Any] = {}
+        pan_provider = self.__kyc_providers.get("pan")
+        if pan_provider is not None:
+            from underwrite.services.kyc_providers.base import Verdict as _V
+
+            result = pan_provider.verify(
+                pan, name=name, consent="Y" if consent_id else ""
+            )
+            pan_provider_result = {
+                "pan_provider_reference": result.reference,
+                "pan_provider_status": result.verdict.value,
+            }
+            if result.verdict == _V.VERIFIED:
+                pan_verdict = "verified"
+            elif result.verdict in (_V.REJECTED, _V.NOT_FOUND, _V.MISMATCH):
+                self.emit(
+                    EventType.KYC_REJECTED,
+                    {
+                        "user": user,
+                        "kyc_status": "rejected",
+                        "reason": f"pan_{result.verdict.value}",
+                        **pan_provider_result,
+                    },
+                    correlation_id=event.correlation_id,
+                )
+                return
+            else:
+                pan_verdict = f"error:{result.error}"
+
         kyc_data: dict[str, Any] = {
             "user": user,
             "pan": pan,
@@ -241,7 +279,7 @@ class ComplianceService(StatefulService):
             "aadhaar": aadhaar[-4:],
             "aadhaar_verified": True,
             "name": name,
-            "kyc_status": "format_verified",
+            "kyc_status": pan_verdict,
             "ckyc_status": "pending",
             "video_kyc_status": "pending",
             "verified_at": event.timestamp,
@@ -255,9 +293,10 @@ class ComplianceService(StatefulService):
             EventType.KYC_VERIFIED,
             {
                 "user": user,
-                "kyc_status": "format_verified",
+                "kyc_status": pan_verdict,
                 "pan_category": pan_cat,
                 "aadhaar_last4": aadhaar[-4:],
+                **pan_provider_result,
             },
             correlation_id=event.correlation_id,
         )

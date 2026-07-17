@@ -98,6 +98,7 @@ class Runtime:
         self.__runtime_identity = None
         self.__secrets = self.__build_secrets()
         self.__runtime_identity = Identity.create("runtime", secrets_manager=self.__secrets)
+        self.__kyc_providers: dict[str, Any] = self.__build_kyc_providers()
         self.__tracer: Tracer | None = self.__build_tracer()
         self.__bus = self.__build_bus()
         self.__saga = SagaOrchestrator(store=self.__store) if self.__config.saga.enabled else None
@@ -217,6 +218,21 @@ class Runtime:
             max_restarts=cfg.max_restarts,
             backoff_seconds=cfg.backoff_seconds,
         )
+
+    def __build_kyc_providers(self) -> dict[str, Any]:
+        """Resolve the configured KYC provider clients.
+
+        Returns a dict mapping the provider name (``pan`` /
+        ``aadhaar`` / ``cibil`` / ``ckyc``) to the configured
+        client instance. When ``kyc_providers`` is not in the
+        configuration, returns an empty dict; the compliance and
+        credit_bureau services then fall back to format-only
+        validation.
+        """
+        kp = getattr(self.__config, "kyc_providers", None)
+        if kp is None:
+            return {}
+        return kp.all(self.__secrets)
 
     def __build_tracer(self) -> Tracer | None:
         if not self.__config.tracing.enabled:
@@ -493,6 +509,10 @@ class Runtime:
             extra["key_secret"] = rconf.key_secret
             extra["webhook_secret"] = rconf.webhook_secret
             extra["api_base_url"] = rconf.api_base_url
+        elif service_name == "compliance":
+            extra["kyc_providers"] = self.__kyc_providers
+        elif service_name == "credit_bureau":
+            extra["kyc_providers"] = self.__kyc_providers
         elif service_name == "consent":
             cconf = self.__config.dpdpa.consent
             extra["required_purposes"] = list(cconf.required_purposes)

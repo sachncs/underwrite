@@ -370,6 +370,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   same overlay path; adding a new section means adding one
   line to a mapping instead of duplicating five lines of
   bespoke logic.
+- **Real KYC provider integrations landed** — the four
+  KYC integrations that were stubbed at the protocol level
+  (PAN / Aadhaar eKYC / CIBIL / CKYC) now have full wire-protocol
+  clients in `services/kyc_providers/`:
+
+  - `pan.py` — ITD PAN verify via KYC service providers
+    (Karza/Signzy); HMAC-SHA256 signed POST /v2/pan/verify
+  - `aadhaar.py` — UIDAI KUA eKYC; pluggable KUA SDK via
+    `_send_kyc_request` override
+  - `cibil.py` — TransUnion CIBIL consumer bureau pull;
+    POST /v2/cibil/score
+  - `ckyc.py` — CERSAI CKYC registry search;
+    POST /v1/ckyc/search
+
+  Common surface in `base.py`: `Verdict` enum and
+  `ProviderResult` envelope. `Configuration.kyc_providers`
+  is the new Pydantic config block; secret-shaped fields
+  (client_id, client_secret, kua_id, kua_license_key,
+  partner_id, partner_key, search_provider_id,
+  search_provider_key) are read from the configured
+  `SecretsManager` and added to `Configuration.to_dict()`'s
+  redaction list so `config.save()` never persists them.
+  Compliance and credit-bureau services consume the
+  configured providers; without them, they fall back to
+  format-only validation (the v0.9 behaviour). Runtime
+  auto-injects the providers via the new
+  `Runtime.__build_kyc_providers` helper. 21 new tests in
+  `tests/test_kyc_providers.py`.
+- **`SecretsManager.get` / `SecretsManager.set`** — added
+  generic key/value accessors so the KYC provider factory
+  can read client secrets by canonical key
+  (`underwrite/pan/client_id`, `underwrite/aadhaar/kua_id`,
+  etc.) without hard-coding the loader semantics.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

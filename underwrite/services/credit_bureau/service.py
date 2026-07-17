@@ -31,15 +31,21 @@ class CreditBureauService(StatefulService):
         """Initialize the credit bureau service with client and store.
 
         Args:
-            **kwargs: May include ``cibil_api_key`` and ``allow_mock``.
-                Forwarded to StatefulService.__init__ except for the
-                client-only options which are consumed here.
-
+            **kwargs: May include ``cibil_api_key``, ``allow_mock``,
+                and ``kyc_providers`` (a dict mapping
+                ``pan`` / ``aadhaar`` / ``cibil`` / ``ckyc`` to a
+                ``KycProvider`` instance). When ``kyc_providers`` is
+                present the bureau pull goes through the
+                CIBIL partner-API client; otherwise the legacy
+                ``HttpCreditBureauClient`` is used.
         """
-        client_kwargs = {k: v for k, v in kwargs.items() if k in ("cibil_api_key", "allow_mock")}
-        parent_kwargs = {k: v for k, v in kwargs.items() if k not in client_kwargs}
+        client_only = ("cibil_api_key", "allow_mock", "kyc_providers")
+        client_kwargs = {k: v for k, v in kwargs.items() if k in client_only}
+        parent_kwargs = {k: v for k, v in kwargs.items() if k not in client_only}
+        self._kyc_providers: dict[str, Any] = client_kwargs.get("kyc_providers", {})
+        legacy_kwargs = {k: v for k, v in client_kwargs.items() if k != "kyc_providers"}
         super().__init__(**parent_kwargs)
-        self._client: CreditBureauClient = self.build_client(**client_kwargs)
+        self._client: CreditBureauClient = self.build_client(**legacy_kwargs)
         self.reports: dict[str, CreditReport] = {}
         self.ckyc_records: dict[str, dict[str, Any]] = {}
         self.repo: TypedStoreRepository[dict[str, Any]] = self.store_repo("credit_bureau", dict)
@@ -129,6 +135,12 @@ class CreditBureauService(StatefulService):
     def check_bureau(self, event: Event) -> None:
         """Fetch a credit report and emit the result.
 
+        When a ``kyc_providers`` mapping is provided, the bureau
+        pull goes through the new CIBIL partner-API client
+        (``services.kyc_providers.cibil.CibilBureauClient``). The
+        legacy ``HttpCreditBureauClient`` continues to work as a
+        fallback for the generic CIBIL/Experian/Equifax endpoints.
+
         Args:
             event: The CREDIT_BUREAU_CHECK event with pan and
                 optional bureau payload.
@@ -138,6 +150,75 @@ class CreditBureauService(StatefulService):
         bureau: str = event.payload.get("bureau", "cibil")
         if not pan:
             logger.warning("credit_bureau.check missing pan")
+            return
+        kyc_providers = self._kyc_providers
+        cibil_provider = kyc_providers.get("cibil") if kyc_providers else None
+        if cibil_provider is not None and bureau == "cibil":
+            try:
+                result = cibil_provider.verify(
+                    event.payload.get("consumer_id", pan),
+                    name=event.payload.get("name", ""),
+                    dob=event.payload.get("dob", ""),
+                    pan=pan,
+                    address=event.payload.get("address"),
+                    consent=event.payload.get("consent", "Y"),
+                )
+            except Exception as exc:
+                logger.error("credit_bureau.check failed for %s: %s", pan, exc)
+                self.emit(
+                    EventType.CREDIT_BUREAU_CHECK_FAILED,
+                    {
+                        "pan": pan,
+                        "bureau": bureau,
+                        "error": str(exc),
+                    },
+                    correlation_id=event.correlation_id,
+                )
+                return
+            from underwrite.services.kyc_providers.base import Verdict as _V
+
+            if not result.ok:
+                self.emit(
+                    EventType.CREDIT_BUREAU_CHECK_FAILED,
+                    {
+                        "pan": pan,
+                        "bureau": bureau,
+                        "verdict": result.verdict.value,
+                        "error": result.error,
+                    },
+                    correlation_id=event.correlation_id,
+                )
+                return
+            details = result.details
+            try:
+                score = int(details.get("score", 0))
+            except (TypeError, ValueError):
+                score = 0
+            report = CreditReport(
+                bureau=bureau,
+                pan=pan,
+                name=event.payload.get("name", ""),
+                dob=event.payload.get("dob", ""),
+                score=score,
+                tradelines=int(details.get("tradelines", 0)),
+                enquiries_last_30_days=int(details.get("enquiries_last_30_days", 0)),
+                defaults=list(details.get("defaults", [])),
+            )
+            with self.state_lock:
+                self.reports[pan] = report
+                self.sync()
+            self.emit(
+                EventType.CREDIT_BUREAU_CHECKED,
+                {
+                    "pan": pan,
+                    "bureau": bureau,
+                    "score": report.score,
+                    "score_band": details.get("score_band", ""),
+                    "tradelines": report.tradelines,
+                    "provider_reference": result.reference,
+                },
+                correlation_id=event.correlation_id,
+            )
             return
         try:
             report = self._client.fetch_credit_report(pan, bureau)
