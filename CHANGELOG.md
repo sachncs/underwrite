@@ -245,6 +245,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   validated independently; the only thing that fails wholesale
   is the store-level `keys()` enumeration. Regression test
   covers the corrupt-record path.
+- **DistributedRateLimiter permanently blocked after first event**
+  on non-TTL stores — the limiter wrote `True` to the store
+  with no expiration, so the next call saw a "key exists" and
+  refused the event forever. Switch the stored value to
+  `{"expires_at": window_end}`; the limiter consults the timestamp
+  and recycles expired windows. Works on MemoryStore, FileStore,
+  and any Postgres backend without requiring server-side TTL
+  support.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

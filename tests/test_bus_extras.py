@@ -67,6 +67,33 @@ class TestDeadLetterQueue:
         assert remaining == ["e2", "e3", "e4"]
 
 
+class TestDistributedRateLimiterTTL:
+    def test_expired_window_is_recycled(self) -> None:
+        """A window whose end has passed must allow the next event
+        even on stores that lack a native TTL."""
+        from underwrite.__bus__ import DistributedRateLimiter
+        from underwrite.__store__ import MemoryStore
+
+        store = MemoryStore()
+        limiter = DistributedRateLimiter(
+            max_rate=1.0, interval=1.0, store=store
+        )
+        # Manually inject an "expired" window entry
+        store.set("ratelimit:alice:0", {"expires_at": 0.0})
+        assert limiter.check("alice") is True
+
+    def test_active_window_blocks(self) -> None:
+        from underwrite.__bus__ import DistributedRateLimiter
+        from underwrite.__store__ import MemoryStore
+
+        store = MemoryStore()
+        limiter = DistributedRateLimiter(
+            max_rate=1.0, interval=10.0, store=store
+        )
+        assert limiter.check("alice") is True
+        assert limiter.check("alice") is False
+
+
 class TestIdempotencyGuardBoundedHandlers:
     def test_evicts_oldest_handler_when_global_cap_reached(self) -> None:
         from underwrite.__bus__ import IdempotencyGuard

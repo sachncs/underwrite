@@ -415,10 +415,11 @@ class DistributedRateLimiter(RateLimiter):
         now = time.time()
         window = int(now / (self.interval / self.max_rate))
         store_key = f"{self.__prefix}:{key}:{window}"
+        window_end = (window + 1) * (self.interval / self.max_rate)
         raw = self.__store.get(store_key)
-        if raw is not None:
+        if isinstance(raw, dict) and raw.get("expires_at", 0) > now:
             return False
-        self.__store.set(store_key, True)
+        self.__store.set(store_key, {"expires_at": window_end})
         return True
 
 
