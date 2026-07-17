@@ -72,3 +72,23 @@ class TestRedactPayload:
     def test_none_value_preserved(self) -> None:
         result = redact_payload({"key": None})
         assert result["key"] is None
+
+    def test_no_substring_false_positive(self) -> None:
+        """Field names that incidentally contain PII letters as substrings
+        must not be redacted (the previous behaviour redacted ``company``
+        for ``pan``)."""
+        assert is_pii_field("company") is False
+        assert is_pii_field("panel_id") is False
+        assert is_pii_field("panchayat") is False
+        assert is_pii_field("expandable") is False
+        assert is_pii_field("author") is False
+        assert is_pii_field("pinterest") is False
+
+    def test_token_match_for_known_pii(self) -> None:
+        assert is_pii_field("user_pin_code") is True
+        assert is_pii_field("aadhaar_token") is True
+        assert is_pii_field("mobile_number") is True
+
+    def test_unrelated_field_preserved(self) -> None:
+        result = redact_payload({"company": "Acme", "amount": 100, "order_id": "L100"})
+        assert result == {"company": "Acme", "amount": 100, "order_id": "L100"}

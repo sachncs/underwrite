@@ -111,6 +111,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   issues PANs with 4th character `E` and `K`; the validator now
   accepts the full ITD set `ABCEFGHJKLPT` and rejects every other
   letter. New regression tests cover both directions.
+- **PII field matching over-redacted innocent field names** — the
+  `is_sensitive_field` test stripped underscores and then ran a
+  raw substring search, so `pan` matched `company` and `panel_id`,
+  `auth` matched `author`, `pin` matched `pinterest`. Field matching
+  is now token-based: the key is split on non-alphanumeric boundaries
+  and each token is tested for equality against the canonical PII
+  field names. Regression tests cover the over-matching cases
+  (company, panel_id, panchayat, author, pinterest) and the
+  legitimate matches (user_pin_code, aadhaar_token, mobile_number).
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

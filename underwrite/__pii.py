@@ -23,30 +23,29 @@ from typing import Any
 
 PII_FIELD_PATTERNS: list[str] = [
     "aadhaar",
-    "aadhaar_token",
-    "account_number",
-    "bank_account",
-    "bank_urn",
-    "cibil_score",
-    "ckyc_number",
-    "credit_report",
-    "demate_account",
+    "account",
+    "bank",
+    "ckyc",
+    "credit",
+    "demate",
+    "dob",
     "driving_license",
     "email",
     "esic",
+    "folio",
     "ifsc",
+    "license",
     "mobile",
-    "mutual_folio",
-    "pan",
-    "pan_number",
     "passport",
-    "passport_number",
+    "pan",
     "phone",
+    "pin",
+    "pincode",
     "ssn",
-    "tax_id",
+    "tax",
     "uan",
-    "video_kyc_id",
-    "voter_id",
+    "urn",
+    "voter",
 ]
 
 PII_VALUE_PATTERNS: list[str] = [
@@ -68,6 +67,13 @@ PII_VALUE_PATTERNS: list[str] = [
 
 PII_REDACTED: str = "***REDACTED***"
 
+_FIELD_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _field_tokens(key: str) -> set[str]:
+    """Splits a field name into lowercase alphanumeric tokens."""
+    return set(_FIELD_TOKEN_RE.findall(key.lower()))
+
 
 class PIISanitizer:
     """Domain service for PII detection and redaction.
@@ -79,10 +85,19 @@ class PIISanitizer:
 
     @staticmethod
     def is_sensitive_field(key: str) -> bool:
-        """Returns True if the key matches a known PII field name."""
-        lower = key.lower().replace("_", "").replace("-", "")
+        """Returns True if any token of *key* matches a known PII field name.
+
+        Matching is token-based: the key is split into alphanumeric
+        tokens and matched against the canonical PII field names. This
+        avoids the previous substring-after-underscore-strip behaviour
+        that over-matched innocent field names like ``company`` for
+        the ``pan`` pattern.
+        """
+        tokens = _field_tokens(key)
+        if not tokens:
+            return False
         for pattern in PII_FIELD_PATTERNS:
-            if pattern.replace("_", "") in lower:
+            if pattern in tokens:
                 return True
         return False
 
