@@ -279,6 +279,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `UNDERWRITE_REQUIRE_AUTH`, `UNDERWRITE_ALLOW_JOBLIB`,
   `UNDERWRITE_PLUGINS`, `VAULT_TOKEN`), and remove the dead ones
   with a comment explaining the no-env-override services.
+- **CI matrix tested only Python 3.12** — README claims 3.10–3.13
+  support but `ci.yml` ran on 3.12 only. Expand the matrix to
+  3.10/3.11/3.12/3.13; add a coverage gate
+  (`--cov-fail-under=80`); switch `ruff format --diff` to
+  `ruff format --check` so a non-formatted file fails CI; add a
+  TruffleHog secret-scan job so committed secrets are caught
+  before they land.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries
