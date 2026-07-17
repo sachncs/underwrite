@@ -59,6 +59,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   attribute and a non-existent `is_stopped()` method, so every bus was
   reported healthy. Replaced with `LocalBus.subscriber_count()` and
   `LocalBus.is_stopped()`.
+- **`Runtime.publish` always failed signature verification** — events were
+  emitted with `source="runtime"` and an empty signature, so every authz-
+  enabled subscriber routed the event to the DLQ. Runtime now holds an
+  `Identity` for the `runtime` service, signs outbound events (binding
+  event id, timestamp, type, source and payload), and registers its
+  public key in the authz trust set.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

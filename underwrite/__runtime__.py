@@ -15,6 +15,7 @@ __all__ = [
 ]
 
 import importlib
+import json
 import logging
 import threading
 from pathlib import Path
@@ -55,6 +56,7 @@ class Runtime:
     __supervisor: ServiceSupervisor | None
     __metrics_thread: threading.Thread | None
     __metrics_stop: threading.Event | None
+    __runtime_identity: Identity | None
 
     def __init__(self, config: Configuration | None = None, readonly: bool = False) -> None:
         """Initializes the Runtime.
@@ -72,6 +74,7 @@ class Runtime:
         self.__read_store = self.__build_read_store()
         self.__services = {}
         self.__lock: threading.RLock = threading.RLock()
+        self.__runtime_identity = None
         if readonly:
             self.__bus = LocalBus(store=self.__store)
             self.__health = HealthRegistry()
@@ -85,6 +88,7 @@ class Runtime:
             self.__metrics_stop = None
             self.__register_subsystem_health()
             return
+        self.__runtime_identity = Identity.create("runtime")
         self.__tracer: Tracer | None = self.__build_tracer()
         self.__bus = self.__build_bus()
         self.__secrets = self.__build_secrets()
@@ -92,6 +96,8 @@ class Runtime:
         self.__health = HealthRegistry()
         self.__metrics = MetricsCollector() if self.__config.metrics.enabled else None
         self.__authz = self.__build_authz()
+        if self.__authz is not None and self.__runtime_identity is not None:
+            self.__authz.trust(self.__runtime_identity.service_id, self.__runtime_identity.public_key)
         self.__supervisor = self.__build_supervisor()
         self.__metrics_thread = None
         self.__metrics_stop = None
@@ -627,15 +633,38 @@ class Runtime:
         return self.__services.get(service_name)
 
     def publish(self, event_type: str, payload: dict[str, Any], correlation_id: str = "") -> str:
-        """Publishes an event directly to the bus (used for external input)."""
+        """Publishes an event directly to the bus (used for external input).
+
+        The event is signed with the runtime identity so subscribers with
+        authz enabled can verify its provenance against the runtime's
+        public key.
+        """
+        event = self.__sign_outbound_event(event_type, payload, correlation_id)
+        return self.__bus.publish(event)
+
+    def __sign_outbound_event(self, event_type: str, payload: dict[str, Any], correlation_id: str) -> Event:
+        identity: Identity | None = self.__runtime_identity
+        if identity is None:
+            return Event(
+                event_type=event_type,
+                source="runtime",
+                source_key="",
+                payload=payload,
+                correlation_id=correlation_id or "",
+            )
         event = Event(
             event_type=event_type,
-            source="runtime",
-            source_key="",
+            source=identity.service_id,
+            source_key=identity.public_key,
             payload=payload,
             correlation_id=correlation_id or "",
         )
-        return self.__bus.publish(event)
+        to_sign = f"{event.event_id}:{event.timestamp}:{event.event_type}:{event.source}:{json.dumps(event.payload, sort_keys=True)}"
+        signed = identity.sign(to_sign)
+        object.__setattr__(event, "signature", signed)
+        if self.__authz is not None:
+            self.__authz.trust(identity.service_id, identity.public_key)
+        return event
 
     async def async_publish(self, event_type: str, payload: dict[str, Any], correlation_id: str = "") -> str:
         """Async variant of ``publish`` for use in async contexts (e.g. FastAPI).
