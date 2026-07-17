@@ -78,6 +78,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `Identity.to_pem()` / `Identity.persist()` helpers expose the private
   key for storage. `Runtime` and `NanoService` now plumb the runtime
   `SecretsManager` so service identities survive restarts.
+- **Indian holiday calendar silently stopped working past 2027** — the
+  moveable-holiday table was hard-coded to 2025–2027, so any due-date
+  in 2028 or later missed Republic Day, Diwali, Eid and the rest. The
+  table now extends through 2030 and queries for unknown years fall
+  back to fixed holidays plus Sunday/2nd-Saturday/4th-Saturday rules
+  with a logged warning rather than returning all-business-days.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

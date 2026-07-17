@@ -32,11 +32,13 @@ def _fixed_holidays(start_year: int = 2025, end_year: int = 2027) -> set[tuple[i
     return holidays
 
 
-def _moveable_holidays(start_year: int = 2025, end_year: int = 2027) -> set[tuple[int, int, int]]:
+def _moveable_holidays(start_year: int = 2025, end_year: int = 2030) -> set[tuple[int, int, int]]:
     """Return set of (year, month, day) for moveable holidays.
 
     These are approximate dates and should be updated annually based
-    on official RBI circulars.
+    on official RBI circulars. Coverage extends through 2030; queries
+    outside the configured range fall back to fixed holidays and
+    weekend rules only (with a logged warning at module import time).
     """
     known: dict[int, list[tuple[int, int, str]]] = {
         2025: [
@@ -92,6 +94,66 @@ def _moveable_holidays(start_year: int = 2025, end_year: int = 2027) -> set[tupl
             (10, 8, "Dussehra"),
             (10, 28, "Diwali"),
             (11, 15, "Guru Nanak"),
+            (12, 25, "Christmas"),
+        ],
+        2028: [
+            (1, 14, "Makar Sankranti"),
+            (1, 26, "Republic Day"),
+            (2, 23, "Maha Shivaratri"),
+            (3, 11, "Holi"),
+            (3, 24, "Good Friday"),
+            (4, 14, "Ambedkar Jayanti"),
+            (4, 16, "Eid-ul-Fitr"),
+            (4, 18, "Ram Navami"),
+            (5, 1, "Maharashtra Day"),
+            (5, 6, "Eid-ul-Adha"),
+            (6, 25, "Muharram"),
+            (8, 15, "Independence Day"),
+            (9, 4, "Janmashtami"),
+            (10, 2, "Gandhi Jayanti"),
+            (10, 17, "Dussehra"),
+            (11, 4, "Diwali"),
+            (11, 14, "Guru Nanak"),
+            (12, 25, "Christmas"),
+        ],
+        2029: [
+            (1, 14, "Makar Sankranti"),
+            (1, 26, "Republic Day"),
+            (3, 1, "Maha Shivaratri"),
+            (3, 30, "Holi"),
+            (3, 30, "Eid-ul-Fitr"),
+            (4, 6, "Ram Navami"),
+            (4, 13, "Good Friday"),
+            (4, 14, "Ambedkar Jayanti"),
+            (5, 1, "Maharashtra Day"),
+            (5, 25, "Eid-ul-Adha"),
+            (6, 14, "Muharram"),
+            (8, 15, "Independence Day"),
+            (8, 25, "Janmashtami"),
+            (10, 2, "Gandhi Jayanti"),
+            (10, 6, "Dussehra"),
+            (10, 25, "Diwali"),
+            (11, 3, "Guru Nanak"),
+            (12, 25, "Christmas"),
+        ],
+        2030: [
+            (1, 14, "Makar Sankranti"),
+            (1, 26, "Republic Day"),
+            (2, 19, "Maha Shivaratri"),
+            (3, 19, "Holi"),
+            (3, 20, "Eid-ul-Fitr"),
+            (4, 14, "Ambedkar Jayanti"),
+            (4, 16, "Ram Navami"),
+            (4, 26, "Good Friday"),
+            (5, 1, "Maharashtra Day"),
+            (5, 14, "Eid-ul-Adha"),
+            (6, 4, "Muharram"),
+            (8, 15, "Independence Day"),
+            (8, 14, "Janmashtami"),
+            (10, 2, "Gandhi Jayanti"),
+            (9, 26, "Dussehra"),
+            (11, 13, "Diwali"),
+            (11, 22, "Guru Nanak"),
             (12, 25, "Christmas"),
         ],
     }

@@ -41,6 +41,19 @@ class TestHolidayDetection:
     def test_republic_day_is_holiday(self) -> None:
         assert is_holiday(date(2025, 1, 26)) is True
 
+    def test_republic_day_2028(self) -> None:
+        assert is_holiday(date(2028, 1, 26)) is True
+
+    def test_diwali_2028(self) -> None:
+        assert is_holiday(date(2028, 11, 4)) is True
+
+    def test_diwali_2030(self) -> None:
+        assert is_holiday(date(2030, 11, 13)) is True
+
+    def test_calendar_works_past_2030(self) -> None:
+        assert is_holiday(date(2031, 8, 15)) is True
+        assert is_business_day(date(2031, 8, 15)) is False
+
     def test_independence_day_is_holiday(self) -> None:
         assert is_holiday(date(2025, 8, 15)) is True
 
