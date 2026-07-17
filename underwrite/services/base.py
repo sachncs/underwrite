@@ -74,6 +74,7 @@ class NanoService(ABC):
         tracer: Tracer | None = None,
         saga: SagaOrchestrator | None = None,
         supervisor: ServiceSupervisor | None = None,
+        secrets_manager: Any | None = None,
         max_concurrent: int = 0,
     ) -> None:
         """Initialize the nano service.
@@ -89,11 +90,16 @@ class NanoService(ABC):
             tracer: Optional distributed tracer for handler timing.
             saga: Optional saga orchestrator for multi-step transactions.
             supervisor: Optional supervisor for lifecycle management.
+            secrets_manager: Optional SecretsManager. When provided, the
+                service's Ed25519 private key is loaded from and persisted
+                to the configured backend so the key survives restarts.
             max_concurrent: Max concurrent handler threads
                 (0 = synchronous).
         """
         self.__service_id: str = service_id
-        self.__identity: Identity = identity or Identity.create(service_id)
+        if identity is None:
+            identity = Identity.create(service_id, secrets_manager=secrets_manager)
+        self.__identity: Identity = identity
         self.__bus: EventBus = bus or LocalBus()
         self._store: Store = store or MemoryStore()
         self.__metrics: MetricsCollector | None = metrics
@@ -102,6 +108,7 @@ class NanoService(ABC):
         self.__tracer: Tracer | None = tracer
         self.__saga: SagaOrchestrator | None = saga
         self.__supervisor: ServiceSupervisor | None = supervisor
+        self.__secrets_manager: Any | None = secrets_manager
         self.__counter_lock: threading.Lock = threading.Lock()
         self.__subscriptions: list[str] = []
         self.__running: bool = False
@@ -114,6 +121,9 @@ class NanoService(ABC):
         )
 
         self.__validator: PayloadValidator = PayloadValidator()
+
+        if self.__authz is not None:
+            self.__authz.trust(self.__service_id, self.__identity.public_key)
 
         if self.__saga:
             self.__saga.register_emitter(self.__service_id, self)
@@ -232,7 +242,6 @@ class NanoService(ABC):
         """
         if self.__authz:
             self.__authz.assert_publish(self.__service_id, event_type)
-            self.__authz.trust(self.__service_id, self.__identity.public_key)
         trace_id: str = ""
         parent_span_id: str = ""
         if self.__tracer:

@@ -58,7 +58,10 @@ class Identity:
         Args:
             service_id: Unique name for this service.
             private_key_pem: Optional PEM-encoded private key.
-            secrets_manager: Optional SecretsManager to load the key from.
+            secrets_manager: Optional SecretsManager. When provided, the
+                private key is loaded from the configured backend on
+                startup and any newly generated key is persisted, so
+                the same key survives process restarts.
             encryption_passphrase: If set, the private key is encrypted at
                 rest in memory using this passphrase.
 
@@ -134,7 +137,48 @@ class Identity:
                 )
             ).decode(),
         )
+        if secrets_manager is not None:
+            identity.persist(secrets_manager)
         return identity
+
+    def to_pem(self, passphrase: str | None = None) -> str:
+        """Returns the private key as a PEM-encoded string.
+
+        The result is suitable for storage in a secrets backend and for
+        re-loading via ``Identity.create(private_key_pem=...)``.
+        """
+        with self.__sign_lock:
+            pk = self.__private_key
+        if pk is None:
+            raise IdentityError("private key not loaded")
+        raw = base64.b64decode(pk)
+        if self.encrypted:
+            loaded = serialization.load_der_private_key(
+                raw, password=passphrase.encode() if passphrase else b""
+            )
+        else:
+            loaded = ed25519.Ed25519PrivateKey.from_private_bytes(raw)
+        if not isinstance(loaded, ed25519.Ed25519PrivateKey):
+            raise IdentityError("not an Ed25519 private key")
+        return loaded.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode("utf-8")
+
+    def persist(self, secrets_manager: Any) -> None:
+        """Stores this identity's private key in the secrets backend.
+
+        No-op if a private key is not loaded. Use after generating a new
+        identity so the key survives process restarts.
+        """
+        if secrets_manager is None:
+            return
+        with self.__sign_lock:
+            pk = self.__private_key
+        if pk is None:
+            raise IdentityError("private key not loaded")
+        secrets_manager.store_private_key(self.service_id, self.to_pem())
 
     def sign(self, payload: str, passphrase: str | None = None) -> str:
         """Signs a string payload and returns a base64-encoded signature.

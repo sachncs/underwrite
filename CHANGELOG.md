@@ -71,6 +71,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`Event.canonical_sign_bytes()`) now bind the source and the
   `AccessControl` enforces a 5-minute clock window
   (`AccessControl.set_replay_window` to override; set to 0 to disable).
+- **Identity keys were in-memory only** — every restart generated a new
+  Ed25519 keypair so historical events could no longer be verified.
+  `Identity.create` now accepts a `SecretsManager`, loads an existing
+  PEM key when present, and persists newly generated keys. New
+  `Identity.to_pem()` / `Identity.persist()` helpers expose the private
+  key for storage. `Runtime` and `NanoService` now plumb the runtime
+  `SecretsManager` so service identities survive restarts.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

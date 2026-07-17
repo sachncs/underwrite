@@ -88,10 +88,11 @@ class Runtime:
             self.__metrics_stop = None
             self.__register_subsystem_health()
             return
-        self.__runtime_identity = Identity.create("runtime")
+        self.__runtime_identity = None
+        self.__secrets = self.__build_secrets()
+        self.__runtime_identity = Identity.create("runtime", secrets_manager=self.__secrets)
         self.__tracer: Tracer | None = self.__build_tracer()
         self.__bus = self.__build_bus()
-        self.__secrets = self.__build_secrets()
         self.__saga = SagaOrchestrator(store=self.__store) if self.__config.saga.enabled else None
         self.__health = HealthRegistry()
         self.__metrics = MetricsCollector() if self.__config.metrics.enabled else None
@@ -496,6 +497,7 @@ class Runtime:
             tracer=self.__tracer,
             saga=self.__saga,
             supervisor=self.__supervisor,
+            secrets_manager=self.__secrets,
             **extra,
         )
         with self.__lock:
