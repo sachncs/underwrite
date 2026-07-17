@@ -27,9 +27,13 @@ var (default: `INFO`).
    "message": "...", "module": "foo", "line": 42,
    "correlation_id": "uuid", "trace_id": "uuid"}
   ```
-  The `JsonFormatter` recursively redacts sensitive keys (`password`,
-  `secret`, `token`, `ssn`, `pan`, `account_number`, `pin`, `cvv`, etc.)
-  replacing values with `"***REDACTED***"`.
+  The `JsonFormatter` recursively redacts sensitive keys
+  (`password`, `secret`, `token`, `ssn`, `pan`, `account`, `pin`,
+  `cvv`, etc.) using **token-based** matching: each key is split on
+  non-alphanumeric boundaries and each token is tested for set
+  membership. The previous substring-after-lowercasing behaviour
+  over-matched innocent field names like `company` against `pan`;
+  the token-based form does not.
 
 - **Text** (default otherwise):
   ```
@@ -96,7 +100,15 @@ into the Prometheus exposition format (`text/plain; version=0.0.4`).
 **Endpoint:** `/v1/metrics` (via `__serve__.py`)
 
 **Middleware:** `PrometheusMiddleware` adds `/metrics-prometheus` to any
-Starlette/FastAPI application.
+Starlette/FastAPI application. When `UNDERWRITE_API_TOKEN` (or the
+`api_token` constructor argument) is set, the endpoint requires
+`Authorization: Bearer <token>` and returns 401 otherwise. When no
+token is configured the endpoint is open (the metrics port is
+expected to be on a private network). Tag values are escaped for
+backslash, double-quote and newline so a user-controlled tag cannot
+break out of the label string; tag values are also run through the
+PII redactor so PAN/Aadhaar/mobile numbers cannot end up in the
+Prometheus TSDB.
 
 **Periodic export thread:** `Runtime.__start_metrics_export()` launches
 a daemon thread that snapshots and logs metrics at a configurable
