@@ -94,11 +94,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Razorpay webhook signature verified against a client-supplied secret**
   — the service read `webhook_secret` from the untrusted event payload
   and passed it straight into the HMAC check, so an attacker could
-  submit their own secret and bypass the signature. The service now
-  pulls the secret from the configured Razorpay client
+  submit their own secret in a forged webhook and bypass the signature.
+  The service now pulls the secret from the configured Razorpay client
   (`RazorpayClient.webhook_secret()`) and rejects webhooks when the
   client has no secret configured. Tests updated to set the secret
   on the mock client.
+- **Plugin discovery loaded arbitrary code from any installed package**
+  — `Plugins.discover()` iterated every `underwrite.services` entry
+  point with no allowlist, so a typosquatted dependency could gain
+  full process privileges. Plugins now require an explicit
+  `UNDERWRITE_PLUGINS` allowlist; entry points not in the allowlist
+  are logged and ignored. Setting `UNDERWRITE_PLUGINS=*` re-enables
+  the legacy behaviour with a logged warning.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries
