@@ -133,6 +133,11 @@ class AccessControl:
         with self.__lock:
             self.__trusted_keys.pop(service_id, None)
 
+    def is_trusted(self, service_id: str) -> bool:
+        """Returns True if *service_id* has a registered trusted key."""
+        with self.__lock:
+            return service_id in self.__trusted_keys
+
     def check_publish(self, subject: str, event_type: str) -> bool:
         """Checks whether a subject may publish an event type.
 

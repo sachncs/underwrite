@@ -84,6 +84,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   table now extends through 2030 and queries for unknown years fall
   back to fixed holidays plus Sunday/2nd-Saturday/4th-Saturday rules
   with a logged warning rather than returning all-business-days.
+- **`/v1/publish` accepted arbitrary source identity** — any client with
+  the bearer token could publish events attributed to any source. The
+  endpoint now requires a `source` field, validates its shape, looks
+  up or lazily creates an Ed25519 identity for that source via the
+  runtime `SecretsManager`, and signs the event with that identity.
+  When authz is enabled, the source must be already trusted or the
+  request is rejected.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

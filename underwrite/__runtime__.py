@@ -17,9 +17,12 @@ __all__ = [
 import importlib
 import json
 import logging
+import re
 import threading
 from pathlib import Path
 from typing import Any
+
+_VALID_SOURCE_RE = re.compile(r"^[a-z][a-z0-9_.-]+$")
 
 from underwrite.__authz__ import AccessControl
 from underwrite.__bus__ import EventBus, LocalBus
@@ -57,6 +60,8 @@ class Runtime:
     __metrics_thread: threading.Thread | None
     __metrics_stop: threading.Event | None
     __runtime_identity: Identity | None
+    __publisher_identities: dict[str, Identity]
+    __publisher_lock: threading.Lock
 
     def __init__(self, config: Configuration | None = None, readonly: bool = False) -> None:
         """Initializes the Runtime.
@@ -75,6 +80,8 @@ class Runtime:
         self.__services = {}
         self.__lock: threading.RLock = threading.RLock()
         self.__runtime_identity = None
+        self.__publisher_identities = {}
+        self.__publisher_lock = threading.Lock()
         if readonly:
             self.__bus = LocalBus(store=self.__store)
             self.__health = HealthRegistry()
@@ -643,6 +650,62 @@ class Runtime:
         """
         event = self.__sign_outbound_event(event_type, payload, correlation_id)
         return self.__bus.publish(event)
+
+    def publish_as(
+        self,
+        source: str,
+        event_type: str,
+        payload: dict[str, Any],
+        correlation_id: str = "",
+    ) -> str:
+        """Publishes an event on behalf of *source*.
+
+        The runtime looks up or lazily creates an Ed25519 identity for
+        the requested service id (persisted through the runtime
+        ``SecretsManager`` when one is configured) and signs the event
+        with that identity so downstream subscribers can attribute the
+        event to the requested source rather than to the runtime.
+
+        Args:
+            source: Service id the caller is publishing as. Must match
+                ``[a-z][a-z0-9_.-]+``.
+            event_type: Event type being published.
+            payload: Event payload.
+            correlation_id: Optional correlation id.
+
+        Returns:
+            The dispatched event's id.
+
+        Raises:
+            PermissionError: If authz is enabled and ``source`` is not
+                trusted, or if the source id is invalid.
+        """
+        if not source or not _VALID_SOURCE_RE.match(source):
+            raise PermissionError(f"invalid source id: {source!r}")
+        if self.__authz is not None and not self.__authz.is_trusted(source):
+            raise PermissionError(f"source {source!r} is not trusted")
+        identity = self.__identity_for(source)
+        event = Event(
+            event_type=event_type,
+            source=identity.service_id,
+            source_key=identity.public_key,
+            payload=payload,
+            correlation_id=correlation_id or "",
+        )
+        signed = identity.sign(event.canonical_sign_bytes().decode("utf-8"))
+        object.__setattr__(event, "signature", signed)
+        if self.__authz is not None:
+            self.__authz.trust(identity.service_id, identity.public_key)
+        return self.__bus.publish(event)
+
+    def __identity_for(self, service_id: str) -> Identity:
+        existing = self.__publisher_identities.get(service_id)
+        if existing is not None:
+            return existing
+        identity = Identity.create(service_id, secrets_manager=self.__secrets)
+        with self.__publisher_lock:
+            self.__publisher_identities[service_id] = identity
+        return identity
 
     def __sign_outbound_event(self, event_type: str, payload: dict[str, Any], correlation_id: str) -> Event:
         identity: Identity | None = self.__runtime_identity

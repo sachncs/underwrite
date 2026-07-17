@@ -27,6 +27,7 @@ from underwrite.__exceptions__ import ProtocolError
 from underwrite.__logger__ import logger
 
 __VALID_EVENT_TYPE_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$")
+__VALID_SOURCE_RE = re.compile(r"^[a-z][a-z0-9_.-]+$")
 
 
 def __error_response(status_code: int, message: str, request_id: str = "") -> JSONResponse:
@@ -230,21 +231,38 @@ def create_app(
         event_type = body.get("event_type", "")
         if not event_type or not __VALID_EVENT_TYPE_RE.match(event_type):
             return __error_response(400, "event_type is required")
+        source = body.get("source", "")
+        if not source or not __VALID_SOURCE_RE.match(source):
+            return __error_response(
+                400,
+                "source is required and must match [a-z][a-z0-9_.-]+",
+            )
         rt = runtime
         try:
-            if hasattr(rt, "async_publish"):
-                await rt.async_publish(
+            if hasattr(rt, "publish_as"):
+                result = rt.publish_as(
+                    source=source,
                     event_type=event_type,
                     payload=body.get("payload", {}),
                     correlation_id=body.get("correlation_id", ""),
                 )
             else:
-                rt.publish(
-                    event_type=event_type,
-                    payload=body.get("payload", {}),
-                    correlation_id=body.get("correlation_id", ""),
-                )
-            return JSONResponse(status_code=202, content={"status": "accepted"})
+                result = None
+                if hasattr(rt, "async_publish"):
+                    await rt.async_publish(
+                        event_type=event_type,
+                        payload=body.get("payload", {}),
+                        correlation_id=body.get("correlation_id", ""),
+                    )
+                else:
+                    rt.publish(
+                        event_type=event_type,
+                        payload=body.get("payload", {}),
+                        correlation_id=body.get("correlation_id", ""),
+                    )
+            return JSONResponse(status_code=202, content={"status": "accepted", "event_id": result or ""})
+        except PermissionError as exc:
+            return __error_response(403, str(exc))
         except ProtocolError:
             return __error_response(400, "invalid request")
         except Exception:
