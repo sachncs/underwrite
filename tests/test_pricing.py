@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from underwrite.__bus__ import LocalBus
 from underwrite.__events__ import Event, EventType
 from underwrite.services.pricing.service import (
@@ -63,23 +65,40 @@ class TestPricing:
         assert received[0].payload["interest_rate"] > 0.09
 
     def test_rate_capped_at_all_in_cost_limit(self) -> None:
+        """Over-cap requests are now rejected (RBI rule) rather than silently clamped."""
+        from underwrite.__exceptions__ import ProtocolError
+
         bus = LocalBus()
         received: list = []
         bus.subscribe(EventType.PRICING_COMPUTED, lambda e: received.append(e))
-        request(
-            svc(bus=bus), bus, borrower="high_risk", principal=100000, default_probability=0.80, loan_type="personal"
-        )
-        rate = received[0].payload["interest_rate"]
-        assert rate <= PERSONAL_LOAN_CAP
+        with pytest.raises(ProtocolError, match="exceeds personal cap"):
+            request(
+                svc(bus=bus),
+                bus,
+                borrower="high_risk",
+                principal=100000,
+                default_probability=0.80,
+                loan_type="personal",
+            )
+        assert received == []
 
     def test_micro_loan_rate_capped_by_principal(self) -> None:
+        """Small principal → micro cap; over-cap request rejected."""
+        from underwrite.__exceptions__ import ProtocolError
+
         bus = LocalBus()
         received: list = []
         bus.subscribe(EventType.PRICING_COMPUTED, lambda e: received.append(e))
-        request(svc(bus=bus), bus, borrower="micro", principal=5000, default_probability=0.80, loan_type="personal")
-        rate = received[0].payload["interest_rate"]
-        assert rate <= MICRO_LOAN_CAP
-        assert received[0].payload["rate_cap_applied"] is True
+        with pytest.raises(ProtocolError, match="exceeds personal cap"):
+            request(
+                svc(bus=bus),
+                bus,
+                borrower="micro",
+                principal=5000,
+                default_probability=0.80,
+                loan_type="personal",
+            )
+        assert received == []
 
     def test_origination_fee_is_one_percent_by_default(self) -> None:
         bus = LocalBus()
@@ -198,8 +217,18 @@ class TestPricing:
         assert received[0].payload["origination_fee_pct"] == 0.005
 
     def test_rate_cap_applied_flag(self) -> None:
+        """Over-cap requests are now rejected outright, so the flag is no longer used."""
+        from underwrite.__exceptions__ import ProtocolError
+
         bus = LocalBus()
         received: list = []
         bus.subscribe(EventType.PRICING_COMPUTED, lambda e: received.append(e))
-        request(svc(bus=bus), bus, borrower="capped", principal=100000, default_probability=0.60, loan_type="personal")
-        assert received[0].payload["rate_cap_applied"] is True
+        with pytest.raises(ProtocolError, match="exceeds personal cap"):
+            request(
+                svc(bus=bus),
+                bus,
+                borrower="capped",
+                principal=100000,
+                default_probability=0.60,
+                loan_type="personal",
+            )

@@ -9,6 +9,7 @@ transparent fee disclosure for Indian retail lending.
 from __future__ import annotations
 
 import math
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from underwrite.__events__ import Event, EventType
@@ -97,7 +98,10 @@ class PricingService(NanoService):
 
         rate_cap = compute_rate_cap(principal, loan_type)
         if interest_rate > rate_cap:
-            interest_rate = rate_cap
+            raise ProtocolError(
+                f"interest_rate {interest_rate * 100:.2f}% exceeds {loan_type} cap "
+                f"of {rate_cap * 100:.2f}% (RBI)"
+            )
 
         origination_fee_pct = self.origination_fee_pct(principal, loan_type)
         origination_fee: float = principal * origination_fee_pct
@@ -106,9 +110,10 @@ class PricingService(NanoService):
         total_upfront_fees: float = origination_fee + processing_fee + gst_on_fees
 
         monthly_rate = interest_rate / 12.0
-        emi = self.compute_emi(principal, monthly_rate, tenure_months)
-        total_repayment = emi * tenure_months
-        total_interest = total_repayment - principal
+        emi_dec: Decimal = self.compute_emi(principal, monthly_rate, tenure_months)
+        emi: float = float(emi_dec)
+        total_repayment = emi_dec * Decimal(tenure_months)
+        total_interest = total_repayment - Decimal(str(principal))
         apr = self.compute_apr(principal, tenure_months, interest_rate, processing_fees=total_upfront_fees)
 
         result: dict[str, Any] = {
@@ -117,9 +122,9 @@ class PricingService(NanoService):
             "interest_rate": round(interest_rate, 4),
             "annual_percentage_rate": round(apr, 4),
             "tenure_months": tenure_months,
-            "emi_amount": round(emi, 2),
-            "total_interest_payable": round(total_interest, 2),
-            "total_repayment": round(total_repayment, 2),
+            "emi_amount": emi,
+            "total_interest_payable": float(total_interest),
+            "total_repayment": float(total_repayment),
             "origination_fee": round(origination_fee, 2),
             "origination_fee_pct": origination_fee_pct,
             "processing_fee": round(processing_fee, 2),
@@ -240,7 +245,7 @@ class PricingService(NanoService):
         return 0.04
 
     @staticmethod
-    def compute_emi(principal: float, monthly_rate: float, tenure_months: int) -> float:
+    def compute_emi(principal: float, monthly_rate: float, tenure_months: int) -> Decimal:
         """Compute the equated monthly installment.
 
         Args:
@@ -249,12 +254,16 @@ class PricingService(NanoService):
             tenure_months: Loan tenure in months.
 
         Returns:
-            EMI amount.
+            EMI amount as a Decimal. Computed with Decimal arithmetic
+            to avoid float precision loss for long tenures.
         """
-        if monthly_rate <= 0 or tenure_months <= 0:
-            return principal / max(tenure_months, 1)
-        factor = math.exp(tenure_months * math.log1p(monthly_rate))
-        return principal * monthly_rate * factor / (factor - 1)
+        p = Decimal(str(principal))
+        r = Decimal(str(monthly_rate))
+        n = Decimal(tenure_months)
+        if r <= 0 or n <= 0:
+            return p / max(n, Decimal("1"))
+        factor = (Decimal("1") + r) ** n
+        return (p * r * factor / (factor - Decimal("1"))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     @staticmethod
     def validate_interest_rate(rate: float, loan_type: str = "personal") -> float:
@@ -262,7 +271,7 @@ class PricingService(NanoService):
 
         Args:
             rate: Annual interest rate as decimal.
-            loan_type: One of 'personal', 'home', 'micro', 'education', 'vehicle'.
+            loan_type: One of 'personal', 'home', 'gold', 'micro', 'education', 'vehicle'.
 
         Returns:
             The validated rate.
@@ -270,14 +279,7 @@ class PricingService(NanoService):
         Raises:
             ProtocolError: If rate exceeds regulatory cap.
         """
-        caps = {
-            "personal": 0.24,  # 24% - RBI personal loan cap
-            "home": 0.15,  # 15% - Housing loan
-            "micro": 0.26,  # 26% - Microfinance
-            "education": 0.15,  # 15% - Education loan
-            "vehicle": 0.18,  # 18% - Vehicle loan
-        }
-        cap = caps.get(loan_type, 0.24)
+        cap = compute_rate_cap(0.0, loan_type)
         if rate > cap:
             raise ProtocolError(f"Interest rate {rate * 100:.2f}% exceeds {loan_type} loan cap of {cap * 100:.2f}%")
         return rate

@@ -135,6 +135,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   values are also run through the PII redactor so a misconfigured
   caller cannot persist PAN/Aadhaar/mobile numbers into the
   Prometheus TSDB.
+- **KFS APR Newton-Raphson derivative was mathematically wrong** —
+  the derivative formula in `compute_apr` did not match `PV(r)` so
+  the iteration diverged or converged to the wrong APR for any
+  non-trivial loan. Replaced with the correct analytic derivative
+  `dPV/dr = EMI * [ - (1 - 1/u)/r^2 + n/(r(1+r)u) ]` and added
+  damped Newton steps so the iteration stays bounded for long
+  tenures and high APRs.
+- **Pricing EMI used float `math.exp` for `(1+r)^n`** — precision loss
+  for long tenures or high monthly rates. EMI is now computed with
+  `Decimal` arithmetic and rounded to the nearest paisa.
+- **Pricing silently clamped over-cap interest rates to the RBI cap**
+  — RBI requires rejection. Over-cap requests now raise
+  `ProtocolError` and emit no event. The internal
+  `validate_interest_rate` helper now delegates to
+  `compute_rate_cap` so the two cap dictionaries no longer disagree
+  (previously personal was 0.24 in one and 0.28 in the other).
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

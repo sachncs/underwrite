@@ -48,24 +48,36 @@ def compute_apr(principal: float, emi: Decimal, tenure_months: int, total_fees: 
     """
     net_principal = Decimal(str(principal)) - total_fees
     emi_dec = emi
-    n = tenure_months
+    n = Decimal(tenure_months)
 
     if net_principal <= 0 or emi_dec <= 0 or n <= 0:
         return Decimal("0")
 
+    one = Decimal("1")
     rate = Decimal("0.01")
-    for _ in range(100):
-        factor = (Decimal("1") + rate) ** n
-        pv = emi_dec * (factor - Decimal("1")) / (rate * factor)
+    hundred = Decimal("100")
+    tolerance = Decimal("0.0001")
+    last_diff = None
+    for _ in range(200):
+        u = (one + rate) ** n
+        pv = emi_dec * (u - one) / (rate * u)
         diff = pv - net_principal
-        if abs(diff) < Decimal("0.0001"):
+        if abs(diff) < tolerance:
             break
-        derivative = (
-            emi_dec * ((Decimal("1") + rate) ** n * (Decimal("1") - n * rate) - Decimal("1")) / (rate * rate * factor)
+        if last_diff is not None and (diff * last_diff) < 0:
+            tolerance = tolerance / Decimal("10")
+        last_diff = diff
+        # dPV/dr = EMI * [ - (1 - 1/u) / r^2 + n / (r * (1+r) * u) ]
+        derivative = emi_dec * (
+            -((one - one / u) / (rate * rate))
+            + (n / (rate * (one + rate) * u))
         )
         if derivative == 0:
             break
-        rate -= diff / derivative
+        step = diff / derivative
+        if abs(step) > Decimal("0.1"):
+            step = Decimal("0.1") if step > 0 else Decimal("-0.1")
+        rate -= step
         if rate <= 0:
             rate = Decimal("0.0001")
 
