@@ -26,29 +26,39 @@ class TestBucketClassification:
     def test_standard_30_days(self) -> None:
         assert NPAService.classify_overdue_days(30) == "standard"
 
-    def test_standard_at_boundary_90(self) -> None:
-        assert NPAService.classify_overdue_days(90) == "standard"
+    def test_standard_89_days(self) -> None:
+        assert NPAService.classify_overdue_days(89) == "standard"
+
+    def test_npa_at_boundary_90(self) -> None:
+        """RBI: an asset becomes NPA on day 90+ past due."""
+        assert NPAService.classify_overdue_days(90) == "substandard"
 
     def test_substandard_91_days(self) -> None:
         assert NPAService.classify_overdue_days(91) == "substandard"
 
-    def test_substandard_180_days(self) -> None:
-        assert NPAService.classify_overdue_days(180) == "substandard"
+    def test_substandard_179_days(self) -> None:
+        assert NPAService.classify_overdue_days(179) == "substandard"
+
+    def test_doubtful_180_days(self) -> None:
+        assert NPAService.classify_overdue_days(180) == "doubtful"
 
     def test_doubtful_181_days(self) -> None:
         assert NPAService.classify_overdue_days(181) == "doubtful"
 
-    def test_doubtful_360_days(self) -> None:
-        assert NPAService.classify_overdue_days(360) == "doubtful"
+    def test_doubtful_359_days(self) -> None:
+        assert NPAService.classify_overdue_days(359) == "doubtful"
 
-    def test_loss_361_days(self) -> None:
-        assert NPAService.classify_overdue_days(361) == "loss"
+    def test_loss_360_days(self) -> None:
+        assert NPAService.classify_overdue_days(360) == "loss"
 
     def test_loss_over_1000_days(self) -> None:
         assert NPAService.classify_overdue_days(1000) == "loss"
 
-    def test_negative_days_standard(self) -> None:
-        assert NPAService.classify_overdue_days(-5) == "standard"
+    def test_negative_days_raises(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError, match="non-negative"):
+            NPAService.classify_overdue_days(-5)
 
 
 class TestLoanTracking:

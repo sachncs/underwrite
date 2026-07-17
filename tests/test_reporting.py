@@ -183,16 +183,27 @@ class TestReportingNpaReport:
         assert report["provisioning_coverage_ratio"] == 0.15
 
     def test_npa_ratio(self) -> None:
+        """RBI NPA ratio = NPA outstanding / total outstanding (per bucket)."""
         svc = reporting()
         svc.handle(
-            Event(event_type=EventType.LOAN_ORIGINATED, source="test", payload={"borrower": "a", "principal": 500000})
+            Event(
+                event_type=EventType.PROVISIONING_COMPUTED,
+                source="npa",
+                payload={
+                    "borrower": "standard_a",
+                    "bucket": "standard",
+                    "outstanding": 450000.0,
+                    "provisioning_rate": 0.0025,
+                    "provisioning_amount": 1125.0,
+                },
+            )
         )
         svc.handle(
             Event(
                 event_type=EventType.PROVISIONING_COMPUTED,
                 source="npa",
                 payload={
-                    "borrower": "b5",
+                    "borrower": "doubtful_a",
                     "bucket": "doubtful",
                     "outstanding": 50000.0,
                     "provisioning_rate": 0.25,
@@ -201,4 +212,6 @@ class TestReportingNpaReport:
             )
         )
         report = svc.generate_npa_report()
+        # NPA = 50000, outstanding = 500000 → ratio = 0.1
+        assert report["npa_principal"] == 50000.0
         assert report["npa_ratio"] == 0.1

@@ -201,17 +201,23 @@ class NPAService(StatefulService):
     def classify_overdue_days(days: int) -> str:
         """Classify days-past-due into RBI NPA bucket.
 
+        Per RBI norms an asset becomes NPA on the 91st day past due;
+        we therefore treat ``days >= 90`` as substandard (NPA),
+        ``>= 180`` as doubtful, and ``>= 360`` as loss.
+
         Args:
             days: Number of days past due.
 
         Returns:
             NPA bucket name: standard, substandard, doubtful, or loss.
         """
-        if days <= 90:
+        if days < 0:
+            raise ValueError(f"days must be non-negative (got {days})")
+        if days < 90:
             return "standard"
-        if days <= 180:
+        if days < 180:
             return "substandard"
-        if days <= 360:
+        if days < 360:
             return "doubtful"
         return "loss"
 

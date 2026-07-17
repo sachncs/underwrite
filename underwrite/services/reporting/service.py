@@ -120,6 +120,9 @@ class ReportingService(StatefulService):
     def generate_npa_report(self) -> dict[str, Any]:
         """Generate an NPA-specific regulatory report.
 
+        Per RBI norms the NPA ratio is NPA outstanding over total
+        outstanding, not over cumulative originations.
+
         Returns:
             Dict with bucket-wise counts, outstanding principals, and
             provisioning coverage information.
@@ -130,14 +133,14 @@ class ReportingService(StatefulService):
                 + self.__bucket_principals.get("doubtful", 0.0)
                 + self.__bucket_principals.get("loss", 0.0)
             )
-            total = self.__total_principal or 1.0
+            outstanding = sum(self.__bucket_principals.values()) or 1.0
             return {
                 "report_type": "npa_detailed",
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "bucket_counts": self.__bucket_counts,
                 "bucket_principals": self.__bucket_principals,
                 "npa_principal": npa_principal,
-                "npa_ratio": round(npa_principal / total, 6),
+                "npa_ratio": round(npa_principal / outstanding, 6),
                 "total_provisioning": round(self.__provisioning_total, 2),
                 "provisioning_coverage_ratio": round(self.__provisioning_total / max(npa_principal, 1.0), 6),
             }

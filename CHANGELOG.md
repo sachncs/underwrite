@@ -158,6 +158,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   years, 0 <= penalty_rate <= 100) with `ValueError`. Also guard
   `project_outstanding` against negative payment amounts which
   previously inflated accrued interest instead of being rejected.
+- **NPA classification off-by-one** — `classify_overdue_days(90)`
+  returned ``standard`` even though 90 days past due is the RBI
+  NPA threshold (an asset becomes NPA on day 90+). Switch to
+  strict-less-than boundaries: ``< 90 → standard``, ``< 180 →
+  substandard``, ``< 360 → doubtful``, ``else loss``. Negative
+  days now raise. Tests updated to match RBI norms.
+- **Reporting NPA ratio computed against cumulative originations**
+  — the formula was ``npa / total_originated_principal``, which
+  does not match the RBI definition. Use the ratio of
+  NPA outstanding over total outstanding (sum of all bucket
+  principals) instead.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries
