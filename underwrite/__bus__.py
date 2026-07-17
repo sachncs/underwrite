@@ -95,7 +95,7 @@ class DeadLetterQueue:
             sync_interval: Persist to store only every N puts (1 = every put).
         """
         self.__lock: threading.Lock = threading.Lock()
-        self.__records: list[DeadLetterRecord] = []
+        self.__records: deque[DeadLetterRecord] = deque(maxlen=max_records)
         self.__max_records: int = max_records
         self.__store: Store | None = store
         self.__sync_interval: int = max(sync_interval, 1)
@@ -160,7 +160,10 @@ class DeadLetterQueue:
                         skipped += 1
                 if skipped:
                     logger.warning("skipped %d corrupted DLQ records on load", skipped)
-                self.__records = valid
+                # Build a new deque with the same maxlen so future appends
+                # still evict the oldest entry. Truncate to max_records in
+                # case the persisted queue grew past the cap before reload.
+                self.__records = deque(valid[-self.__max_records :], maxlen=self.__max_records)
             else:
                 logger.warning(
                     "corrupted DLQ store data (expected list, got %s), starting with empty DLQ", type(raw).__name__
@@ -194,8 +197,6 @@ class DeadLetterQueue:
         """
         sanitized_event = _redact_event(event)
         with self.__lock:
-            if len(self.__records) >= self.__max_records:
-                self.__records.pop(0)
             self.__records.append(
                 DeadLetterRecord(event=sanitized_event, error=error, subscriber_id=subscriber_id)
             )
@@ -240,7 +241,8 @@ class DeadLetterQueue:
             to_replay = list(self.__records)
             if max_count > 0:
                 to_replay = to_replay[:max_count]
-            self.__records = self.__records[len(to_replay) :]
+            for _ in range(len(to_replay)):
+                self.__records.popleft()
             self.__sync_counter = 0
             self.__sync_store()
         replayed = 0
@@ -423,20 +425,27 @@ class DistributedRateLimiter(RateLimiter):
 class IdempotencyGuard:
     """Prevents duplicate event processing by tracking seen event IDs per handler.
 
-    Bounded per-handler to prevent unbounded memory growth.
+    Bounded both per-handler (oldest entry evicted past
+    ``max_ids_per_handler``) and globally (oldest handler bucket
+    evicted past ``max_handlers``) to prevent unbounded memory
+    growth in long-running processes.
     """
 
-    def __init__(self, max_ids_per_handler: int = 100000) -> None:
+    def __init__(self, max_ids_per_handler: int = 100000, max_handlers: int = 1000) -> None:
         """Initializes an empty idempotency guard.
 
         Args:
             max_ids_per_handler: Maximum event IDs tracked per handler
                 before oldest entries are evicted.
+            max_handlers: Maximum number of distinct handler ids tracked
+                before the oldest handler bucket is evicted.
         """
         self.__lock: threading.Lock = threading.Lock()
         self.__seen: dict[str, set[str]] = {}
         self.__order: dict[str, deque[str]] = {}
+        self.__handler_order: deque[str] = deque()
         self.__max_ids: int = max_ids_per_handler
+        self.__max_handlers: int = max_handlers
 
     @property
     def total_tracked_events(self) -> int:
@@ -458,8 +467,20 @@ class IdempotencyGuard:
             True if this event was already seen for this handler.
         """
         with self.__lock:
-            seen = self.__seen.setdefault(handler_id, set())
-            order = self.__order.setdefault(handler_id, deque())
+            seen = self.__seen.get(handler_id)
+            if seen is None:
+                seen = set()
+                self.__seen[handler_id] = seen
+                self.__order[handler_id] = deque()
+                self.__handler_order.append(handler_id)
+                if len(self.__handler_order) > self.__max_handlers:
+                    evicted_handler = self.__handler_order.popleft()
+                    self.__seen.pop(evicted_handler, None)
+                    self.__order.pop(evicted_handler, None)
+                    logger.warning(
+                        "idempotency guard evicting oldest handler bucket %s", evicted_handler
+                    )
+            order = self.__order[handler_id]
             if event_id in seen:
                 return True
             seen.add(event_id)
@@ -530,7 +551,7 @@ class LocalBus(EventBus):
         """
         self.__lock: threading.RLock = threading.RLock()
         self.__handlers: dict[str, list[tuple[str, Callable[[Event], None]]]] = {}
-        self.__buffer: list[Event] = []
+        self.__buffer: deque[Event] = deque()
         self.__running: bool = True
         self.__started: bool = False
         self.__dlq: DeadLetterQueue = DeadLetterQueue(store=store)
@@ -567,7 +588,7 @@ class LocalBus(EventBus):
         """
         with self.__lock:
             if self.__max_buffer_size > 0 and len(self.__buffer) >= self.__max_buffer_size:
-                dropped = self.__buffer.pop(0)
+                dropped = self.__buffer.popleft()
                 logger.warning("buffer full, dropping oldest event %s (%s)", dropped.event_id, dropped.event_type)
             self.__buffer.append(event)
             if self.__running:
@@ -660,7 +681,8 @@ class LocalBus(EventBus):
         self.__futures.clear()
 
     def __flush(self) -> None:
-        pending, self.__buffer = self.__buffer, []
+        pending: deque[Event] = self.__buffer
+        self.__buffer = deque()
         for event in pending:
             handlers = self.__handlers.get(event.event_type, []) + self.__handlers.get("*", [])
             for sid, handler in handlers:

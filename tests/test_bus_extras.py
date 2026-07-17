@@ -67,6 +67,19 @@ class TestDeadLetterQueue:
         assert remaining == ["e2", "e3", "e4"]
 
 
+class TestIdempotencyGuardBoundedHandlers:
+    def test_evicts_oldest_handler_when_global_cap_reached(self) -> None:
+        from underwrite.__bus__ import IdempotencyGuard
+
+        guard = IdempotencyGuard(max_ids_per_handler=10, max_handlers=2)
+        assert guard.is_duplicate("h1", "e1") is False
+        assert guard.is_duplicate("h2", "e1") is False
+        # Adding a third handler should evict h1
+        assert guard.is_duplicate("h3", "e1") is False
+        # h1's entries were evicted; h1 should be a fresh bucket now
+        assert guard.is_duplicate("h1", "e1") is False
+
+
 class TestRateLimiter:
     def test_allows_first_call(self) -> None:
         rl = RateLimiter(max_rate=10)

@@ -189,6 +189,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the same value, and a docstring clarifies the units. Downstream
   consumers should migrate to `total_interest`; `protocol_premium`
   is kept for backwards compatibility.
+- **Bus hot paths used O(n) `list.pop(0)`** — `DeadLetterQueue.put`,
+  `LocalBus.publish`, and the bus buffer all used ``list.pop(0)``
+  for FIFO eviction, which is O(n) per call. Convert to
+  ``collections.deque`` so the eviction is O(1) and the bus
+  no longer degrades under sustained failure load.
+- **IdempotencyGuard leaked handler buckets** — the outer dict
+  mapping ``handler_id → set`` was unbounded. A misbehaving caller
+  (or simply many service ids) could grow the dict forever.
+  Add ``max_handlers`` (default 1000); the oldest handler bucket
+  is evicted past the cap. New regression test covers the eviction.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries
