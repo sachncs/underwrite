@@ -87,14 +87,40 @@ Parsed by `Configuration.__apply_env_overrides()` in
 
 ## RBI Pricing Caps (India)
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `UNDERWRITE_PERSONAL_LOAN_RATE_CAP` | No | `0.28` | Max all-in-cost rate for personal loans (28% p.a. per RBI) |
-| `UNDERWRITE_MICRO_LOAN_RATE_CAP` | No | `0.30` | Max all-in-cost rate for micro loans under ₹50K (30% p.a. per RBI) |
-| `UNDERWRITE_PENAL_INTEREST_CAP` | No | `0.24` | Max penal interest rate (24% p.a. per RBI DLG) |
-| `UNDERWRITE_COOLING_OFF_DAYS` | No | `3` | Cooling-off / free-look period for loan cancellation (RBI DLG) |
-| `UNDERWRITE_FORECLOSURE_CHARGE_PERSONAL` | No | `0.00` | Foreclosure charge for personal loans (0% per RBI) |
-| `UNDERWRITE_FORECLOSURE_CHARGE_HOME` | No | `0.00` | Foreclosure charge for home loans (0% per RBI NHB) |
+The pricing service has static rate-cap defaults that are read by
+`compute_rate_cap` and `validate_interest_rate`. The four
+product-specific caps are:
+
+| Loan type | Default cap | RBI norm |
+|-----------|--------------|----------|
+| Home | 0.12 (12% p.a.) | 12% |
+| Gold | 0.18 (18% p.a.) | 18% |
+| Personal | 0.28 (28% p.a.) | 28% |
+| Micro | 0.30 (30% p.a.) | 30% |
+| Default (other) | 0.30 | 30% |
+
+These are constructed as kwargs at `PricingService` construction time
+and not overridden by environment variables. Construct a
+`PricingService` with custom caps:
+
+```python
+from underwrite.services.pricing.service import PricingService
+
+service = PricingService(
+    service_id="pricing",
+    rate_cap=0.24,
+    penal_interest_cap=0.24,
+)
+```
+
+`UNDERWRITE_COOLING_OFF_DAYS` is similarly not honoured at the
+`Configuration` layer — pass `cooling_off_days=...` to
+`KfsService` directly.
+
+Over-cap requests are **rejected** with `ProtocolError`, not
+silently clamped to the cap. This is the RBI-required behaviour:
+the rate must be refused at origination, not laundered through
+post-hoc clamping.
 
 ---
 
