@@ -106,6 +106,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `UNDERWRITE_PLUGINS` allowlist; entry points not in the allowlist
   are logged and ignored. Setting `UNDERWRITE_PLUGINS=*` re-enables
   the legacy behaviour with a logged warning.
+- **PAN validator rejected valid PANs** — `require_pan` accepted only
+  4th-character letters `ABCFGHJLPT` (10 letters). Income Tax also
+  issues PANs with 4th character `E` and `K`; the validator now
+  accepts the full ITD set `ABCEFGHJKLPT` and rejects every other
+  letter. New regression tests cover both directions.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries

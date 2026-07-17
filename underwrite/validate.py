@@ -260,7 +260,7 @@ class PayloadValidator:
         s = s.upper().strip()
         if not re.match(r"^[A-Z]{5}[0-9]{4}[A-Z]$", s):
             raise ProtocolError(f"{name} must be a valid PAN (e.g. ABCDE1234F)")
-        if s[3] not in "ABCFGHJLPT":
+        if s[3] not in "ABCEFGHJKLPT":
             raise ProtocolError(f"{name} has invalid status code (4th character)")
         return s
 

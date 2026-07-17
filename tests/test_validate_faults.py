@@ -17,6 +17,7 @@ from underwrite.validate import (
     require_finite,
     require_in_range,
     require_match,
+    require_pan,
     require_non_empty,
     require_non_negative,
     require_positive,
@@ -336,6 +337,24 @@ class TestGetMatch:
     def test_raises_for_non_match(self) -> None:
         with pytest.raises(ProtocolError, match="does not match"):
             get_match({"code": "abc"}, "code", r"^\d+$")
+
+
+class TestRequirePan:
+    """Tests for require_pan — ITD-compliant PAN validation."""
+
+    @pytest.mark.parametrize("fourth", list("ABCEFGHJKLPT"))
+    def test_accepts_valid_fourth_letter(self, fourth: str) -> None:
+        pan = f"ABC{fourth}A1234A"
+        assert require_pan(pan) == pan
+
+    @pytest.mark.parametrize("fourth", list("DIMNOQRSUVWXYZ"))
+    def test_rejects_invalid_fourth_letter(self, fourth: str) -> None:
+        pan = f"ABC{fourth}A1234A"
+        with pytest.raises(ProtocolError, match="status code"):
+            require_pan(pan)
+
+    def test_rejects_lowercase_pan_normalized(self) -> None:
+        assert require_pan("abcpk1234a") == "ABCPK1234A"
 
     def test_raises_for_missing_key(self) -> None:
         with pytest.raises(ProtocolError, match="must be a non-empty string"):
