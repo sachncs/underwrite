@@ -499,7 +499,8 @@ class LocalBus(EventBus):
         self.__lock: threading.RLock = threading.RLock()
         self.__handlers: dict[str, list[tuple[str, Callable[[Event], None]]]] = {}
         self.__buffer: list[Event] = []
-        self.__running: bool = False
+        self.__running: bool = True
+        self.__started: bool = False
         self.__dlq: DeadLetterQueue = DeadLetterQueue(store=store)
         self.__idempotency: IdempotencyGuard = IdempotencyGuard()
         self.__circuit_breaker: PerSubscriberCircuitBreaker = PerSubscriberCircuitBreaker()
@@ -568,10 +569,39 @@ class LocalBus(EventBus):
                     (sid, h) for sid, h in self.__handlers[event_type] if sid != subscription_id
                 ]
 
-    def start(self) -> None:
-        """Starts the bus and flushes any buffered events."""
+    def is_stopped(self) -> bool:
+        """Returns True when the bus has been explicitly stopped via ``stop()``.
+
+        A freshly constructed bus is considered running (``is_stopped()`` returns
+        ``False``) so that subscribers attached before ``start()`` can still
+        dispatch once the runtime begins publishing.
+        """
         with self.__lock:
+            return not self.__running
+
+    def subscriber_count(self, event_type: str | None = None) -> int:
+        """Returns the number of registered subscribers.
+
+        Args:
+            event_type: If provided, count only subscribers to that event type;
+                pass ``"*"`` for the wildcard bucket, or ``None`` for the total.
+        """
+        with self.__lock:
+            if event_type is None:
+                return sum(len(handlers) for handlers in self.__handlers.values())
+            return len(self.__handlers.get(event_type, ()))
+
+    def start(self) -> None:
+        """Starts the bus and flushes any buffered events.
+
+        Idempotent: calling ``start()`` more than once is a no-op beyond the
+        initial flush of any buffered events.
+        """
+        with self.__lock:
+            already_started = self.__started
             self.__running = True
+            self.__started = True
+        if not already_started:
             self.__flush()
 
     def __handle_future(self, f: concurrent.futures.Future) -> None:

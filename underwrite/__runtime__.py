@@ -323,13 +323,19 @@ class Runtime:
 
         def _bus_health() -> dict:
             subs = 0
-            if hasattr(self.__bus, "_EventBus__subscriptions"):
-                subs = len(self.__bus._EventBus__subscriptions)
+            getter = getattr(self.__bus, "subscriber_count", None)
+            if callable(getter):
+                try:
+                    subs = int(getter())
+                except Exception:
+                    logger.exception("bus subscriber_count failed")
             dlq = 0
-            if hasattr(self.__bus, "dlq") and self.__bus.dlq:
-                dlq = self.__bus.dlq.count
+            dlq_obj = getattr(self.__bus, "dlq", None)
+            if dlq_obj is not None:
+                dlq = int(getattr(dlq_obj, "count", 0))
+            stopped = bool(getattr(self.__bus, "is_stopped", lambda: False)())
             return {
-                "ok": (not self.__bus.is_stopped()) if hasattr(self.__bus, "is_stopped") else True,
+                "ok": not stopped,
                 "subscribers": subs,
                 "dlq_count": dlq,
             }

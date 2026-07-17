@@ -11,6 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `LocalBus.is_stopped()` and `LocalBus.subscriber_count()` public accessors;
+  runtime bus health probe now reports the real subscriber count and
+  stopped-state instead of always returning `ok: True`.
 - SQS distributed event bus backend (`__bus_sqs__.py`, 172 lines)
 - Modal distributed event bus backend (`__bus_modal__.py`, 141 lines)
 - DPDPA 2023 compliance config: `ConsentConfig`, `DsrConfig`, `DpdpaConfig` with consent validity, DSR response SLA, breach notification timer, data retention periods
@@ -41,6 +44,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **PostgresStore** — migration engine uses lock_timeout and statement_timeout for safety
 - `UNDERWRITE_AUDIT_EXPORT_URL` env var added for audit log offloading
 - PII redaction — Aadhaar-like 12-digit and PAN-like patterns redacted in logs and audit
+- `LocalBus` lifecycle: a freshly constructed bus is now considered running.
+  `start()` is idempotent and flushes the buffer only on the first call.
 
 ### Fixed
 - `UNDERWRITE_RECOVERY_BACKOFF` env var now correctly maps to `recovery.backoff_seconds`
@@ -49,6 +54,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `__secrets__` backend fallback ordering — Vault/AWS not tried when `backend=env`
 - Vault `KVv2` secret path handling — mounts at correct engine path
 - Fixed broken `docs/ARCHITECTURE.md` link in README (should be `architecture.md`)
+- **CLI `underwrite health` and `/v1/health` always reported `ok: True`** —
+  the bus health probe looked for a non-existent `_EventBus__subscriptions`
+  attribute and a non-existent `is_stopped()` method, so every bus was
+  reported healthy. Replaced with `LocalBus.subscriber_count()` and
+  `LocalBus.is_stopped()`.
 
 ### Added Tests
 - 138-line compliance test suite: PAN format + category, Aadhaar Verhoeff checksum, AML frozen/flagged/cleared, CKYC/video KYC events, consent pre-check, status queries
