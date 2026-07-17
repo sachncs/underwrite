@@ -176,7 +176,15 @@ class DeadLetterQueue:
         try:
             store.set("bus:dlq", [self.record_to_dict(r) for r in self.__records])
         except Exception:
-            logger.exception("failed to persist DLQ records to store")
+            # Persist failures mean the DLQ is operating as a
+            # memory-only queue. We log loudly so operators can
+            # detect silent data loss but do not re-raise — the
+            # in-memory record is still recoverable for the
+            # current process lifetime.
+            logger.exception(
+                "failed to persist DLQ records to store — DLQ is now "
+                "memory-only until the store recovers"
+            )
 
     def __should_sync(self) -> bool:
         self.__sync_counter += 1

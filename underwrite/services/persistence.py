@@ -150,21 +150,36 @@ class BatchedStoreRepository(TypedStoreRepository[T]):
         self.__batch_lock: threading.Lock = threading.Lock()
         self.__sync_interval: int = max(sync_interval, 1)
         self.__sync_counter: int = 0
+        # Cache the most recent data so a force_sync on shutdown
+        # persists the latest state even if the interval was
+        # never reached. incr_and_maybe_sync() updates this on
+        # every call and saves the latest value when the counter
+        # trips.
+        self.__pending: T | None = None
 
     def incr_and_maybe_sync(self, data: T) -> bool:
         """Increment the counter and trigger sync if threshold reached.
 
+        Caches *data* so the next sync writes the latest state,
+        not the state that happened to be passed at the trip
+        point. Callers that want a strict batched snapshot of
+        a specific value should use save() directly.
+
         Args:
-            data: The state to persist when the threshold is met.
+            data: The latest state; will be persisted on the next
+                sync boundary.
 
         Returns:
             True if a sync was triggered, False otherwise.
         """
         with self.__batch_lock:
+            self.__pending = data
             self.__sync_counter += 1
             if self.__sync_counter >= self.__sync_interval:
                 self.__sync_counter = 0
-                self.save(data)
+                pending = self.__pending
+                self.__pending = None
+                self.save(pending)  # type: ignore[arg-type]
                 return True
         return False
 

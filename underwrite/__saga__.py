@@ -136,6 +136,7 @@ class SagaOrchestrator:
         self.__sagas: dict[str, Saga] = {}
         self.__emitters: dict[str, Emitter] = {}
         self.__store: Store = store or MemoryStore()
+        self.__compensation_executor: concurrent.futures.ThreadPoolExecutor | None = None
         self.__load_sagas()
 
     def __get_saga_lock(self, saga_id: str) -> threading.RLock:
@@ -338,9 +339,40 @@ class SagaOrchestrator:
         if emitter is None:
             logger.warning("no emitter for %s, skipping compensation event %s", context.get("source", ""), event_type)
             return
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            fut = pool.submit(emitter.emit, event_type, payload, context.get("correlation_id", ""))
+        # Use a single shared executor for compensation emits so
+        # we don't pay the cost of a fresh ThreadPoolExecutor per
+        # compensation step. The executor is created lazily and
+        # torn down on .close().
+        if self.__compensation_executor is None:
+            self.__compensation_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=2, thread_name_prefix="saga-compensate"
+            )
+        fut = self.__compensation_executor.submit(
+            emitter.emit, event_type, payload, context.get("correlation_id", "")
+        )
+        try:
             fut.result(timeout=30.0)
+        except concurrent.futures.TimeoutError:
+            logger.error(
+                "compensation %s for %s timed out after 30s; cancelling",
+                event_type,
+                context.get("source", ""),
+            )
+            fut.cancel()
+            raise
+        except Exception:
+            logger.exception(
+                "compensation %s for %s failed",
+                event_type,
+                context.get("source", ""),
+            )
+            raise
+
+    def close(self) -> None:
+        """Shut down the orchestrator and release the shared executor."""
+        if self.__compensation_executor is not None:
+            self.__compensation_executor.shutdown(wait=True)
+            self.__compensation_executor = None
 
     def get_saga(self, saga_id: str) -> Saga | None:
         """Returns a copy of the saga state, or ``None`` if not found.
