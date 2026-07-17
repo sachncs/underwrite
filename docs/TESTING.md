@@ -40,8 +40,12 @@ All shared fixtures are defined in `tests/conftest.py`:
 | `client` | `TestClient` | FastAPI `TestClient` wrapping `create_app()` (requires `serve` extra) |
 | `event` | `Event` | Minimal `LOAN_ORIGINATED` event with known payload |
 | `tmp_config` | `dict` | Temporary JSON config file + parsed data |
-| `fail_store` | `FailAfterCountStore` | `MemoryStore` subclass that raises `RuntimeError` after N operations |
-| `injecting_bus` | `LocalBus` | Bus whose first `publish()` always raises |
+
+The earlier `fail_store` and `injecting_bus` fixtures were removed
+as dead code in the v0.9 hardening pass — neither was imported by
+any test file. Tests that need a failing store can construct one
+inline; tests that need a failing bus can subclass `LocalBus` and
+override `publish` inline.
 
 ### Using Fixtures in a Test
 
@@ -61,13 +65,31 @@ def test_pg_persistence(pg_store):
     assert pg_store.get("key") == {"nested": True}
 ```
 
-### Writing Tests with fail_store
+### Constructing an in-test failing store or bus
+
+The `fail_store` and `injecting_bus` fixtures are no longer
+shipped — neither was imported by any test. Tests that need a
+failing store or bus should construct one inline:
 
 ```python
-def test_store_error_handling(fail_store):
-    fail_store.set("ok", "value")      # succeeds (first op)
-    with pytest.raises(RuntimeError):
-        fail_store.get("fail")          # fails (second op exceeds fail_after=1)
+class FailAfterCountStore(MemoryStore):
+    def __init__(self, fail_after: int) -> None:
+        super().__init__()
+        self._fail_after = fail_after
+        self._ops = 0
+
+    def _maybe_fail(self) -> None:
+        self._ops += 1
+        if self._ops > self._fail_after:
+            raise StoreError("simulated failure")
+
+    def set(self, key, value):
+        self._maybe_fail()
+        return super().set(key, value)
+
+class InjectingBus(LocalBus):
+    def publish(self, event):
+        raise RuntimeError("injected publish failure")
 ```
 
 ---
@@ -89,6 +111,9 @@ python -m pytest tests/test_fee.py::TestFeeService::test_assesses_fixed_fee -v
 # With coverage
 python -m pytest tests/ --cov=underwrite --cov-report=term-missing
 
+# With coverage gate (CI default; fails under 80%)
+python -m pytest tests/ --cov=underwrite --cov-fail-under=80
+
 # With coverage HTML report
 python -m pytest tests/ --cov=underwrite --cov-report=html
 open htmlcov/index.html
@@ -106,15 +131,22 @@ asyncio_mode = "auto"
 python_files = ["test_*.py"]
 ```
 
-### Matrix Testing (tox)
+### Matrix Testing
 
-`tox.ini` runs against Python 3.9–3.12 plus lint and typecheck envs:
+CI runs against Python 3.10–3.13 plus a separate secrets-scan job
+(TruffleHog). Each Python matrix entry installs the dev, risk,
+serve, postgres, otlp, vault, and aws extras, then runs:
 
-```bash
-tox -e py312
-tox                          # all envs (requires interpreters)
-tox -e lint                  # ruff check only
-```
+1. `ruff format --check` (formatting)
+2. `ruff check` (lint)
+3. `mypy` (types)
+4. `bandit` (security)
+5. `pip-audit` (dependency audit)
+6. `pytest --cov --cov-fail-under=80`
+
+For local matrix testing with tox (optional — CI is the source of
+truth), `tox.ini` defines `py39`-`py12` envs; use the Python
+version available on the developer machine.
 
 ---
 
