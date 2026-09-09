@@ -1,0 +1,169 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sachin
+
+"""Statement generation service.
+
+Produces periodic account statements showing transactions, outstanding
+balance, fees, and payment history.  Emits ``statement.generated``
+when a statement is produced.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from underwrite.authz import AccessControl
+from underwrite.bus import EventBus
+from underwrite.health import Checks
+from underwrite.keypair import Keypair
+from underwrite.local import LocalBus
+from underwrite.logger import logger
+from underwrite.message import Message, Type
+from underwrite.metrics import Collector, SystemClock
+from underwrite.saga import Orchestrator
+from underwrite.services.base import Core, Dependencies
+from underwrite.store import StoreBackend
+from underwrite.supervisor import Watcher
+from underwrite.tracer import Tracer
+from underwrite.validate import PayloadValidator
+
+
+class Handler(Core):
+    """Generates account statements showing loan activity and current status."""
+
+    def __init__(
+        self,
+        name: str,
+        bus: EventBus | LocalBus,
+        store: StoreBackend,
+        identity: Keypair | None = None,
+        metrics: Collector | None = None,
+        health: Checks | None = None,
+        authz: AccessControl | None = None,
+        tracer: Tracer | None = None,
+        saga: Orchestrator | None = None,
+        supervisor: Watcher | None = None,
+        secrets_manager: Any | None = None,
+        max_concurrent: int = 0,
+    ) -> None:
+        deps = Dependencies(
+            identity=identity,
+            bus=bus,
+            store=store,
+            metrics=metrics,
+            health=health,
+            authz=authz,
+            tracer=tracer,
+            saga=saga,
+            supervisor=supervisor,
+            secrets_manager=secrets_manager,
+            max_concurrent=max_concurrent,
+        )
+        super().__init__(
+            name=name,
+            bus=deps.bus,
+            store=deps.store,
+            metrics=deps.metrics,
+            health=deps.health,
+            authz=deps.authz,
+            tracer=deps.tracer,
+            saga=deps.saga,
+            supervisor=deps.supervisor,
+            secrets_manager=deps.secrets_manager,
+            max_concurrent=deps.max_concurrent,
+        )
+        self.clock: SystemClock = SystemClock()
+        self.handlers: dict[str, Any] = {
+            Type.STATEMENT_GENERATE: self.on_statement_generate,
+            Type.COLLECTION_UPDATED: self.on_collection_updated,
+            Type.PAYMENT_RECEIVED: self.on_payment_received_trigger,
+        }
+
+    def handle(self, event: Message) -> None:
+        handler = self.handlers.get(event.event_type)
+        if handler is not None:
+            handler(event)
+
+    def on_statement_generate(self, event: Message) -> None:
+        """Generate a statement for the given loan and period.
+
+        Args:
+            event: The STATEMENT_GENERATE event.
+        """
+        loan_id: str = event.payload.get("loan_id", "")
+        period_start: str = event.payload.get("period_start", "")
+        period_end: str = event.payload.get("period_end", "")
+        if not loan_id or not period_start:
+            logger.warning("dropping STATEMENT_GENERATE with missing loan_id or period_start")
+            return
+
+        with self.state_lock:
+            statement_id: str = f"stmt_{loan_id}_{period_start}"
+            if self.store.exists(f"statement:{statement_id}"):
+                return
+
+            transactions: list[dict[str, Any]] = []
+            for key in self.store.keys(f"payment:pay_{loan_id}"):
+                payment = self.store.get(key)
+                if payment:
+                    transactions.append(payment)
+            total_paid: float = sum(PayloadValidator.require_finite(t.get("amount", 0), "amount") for t in transactions)
+
+            loan = self.store.get(f"loan:{loan_id}")
+            outstanding: float = (
+                PayloadValidator.require_finite(loan.get("outstanding", 0), "outstanding") if loan else 0.0
+            )
+
+            statement: dict[str, Any] = {
+                "statement_id": statement_id,
+                "loan_id": loan_id,
+                "period_start": period_start,
+                "period_end": period_end or self.clock.iso(),
+                "outstanding": outstanding,
+                "total_paid": total_paid,
+                "transaction_count": len(transactions),
+                "generated_at": self.clock.iso(),
+            }
+            self.store.set(f"statement:{statement_id}", statement)
+        self.emit(
+            Type.STATEMENT_GENERATED,
+            {
+                "statement_id": statement_id,
+                "loan_id": loan_id,
+                "outstanding": outstanding,
+                "total_paid": total_paid,
+            },
+            correlation_id=event.correlation_id,
+        )
+
+    def on_collection_updated(self, event: Message) -> None:
+        """Record a collection update trigger for statement generation.
+
+        Args:
+            event: The COLLECTION_UPDATED event.
+        """
+        loan_id = event.payload.get("loan_id", "")
+        if loan_id:
+            self.store.set(
+                f"stmt_trigger:{loan_id}:{self.clock.iso()}",
+                {
+                    "loan_id": loan_id,
+                    "trigger": "collection_update",
+                },
+            )
+
+    def on_payment_received_trigger(self, event: Message) -> None:
+        """Record a payment received trigger for statement generation.
+
+        Args:
+            event: The PAYMENT_RECEIVED event.
+        """
+        loan_id = event.payload.get("loan_id", "")
+        if loan_id:
+            self.store.set(
+                f"stmt_trigger:{loan_id}:{self.clock.iso()}",
+                {
+                    "loan_id": loan_id,
+                    "trigger": "payment",
+                },
+            )

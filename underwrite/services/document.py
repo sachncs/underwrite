@@ -1,0 +1,129 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sachin
+
+"""Document - generates and manages loan document references.
+
+Listens for underwriter.approved events, creates document records,
+and emits document.generated.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from underwrite.authz import AccessControl
+from underwrite.bus import EventBus
+from underwrite.health import Checks
+from underwrite.keypair import Keypair
+from underwrite.local import LocalBus
+from underwrite.message import Message, Type
+from underwrite.metrics import Collector
+from underwrite.saga import Orchestrator
+from underwrite.services.base import Dependencies, StatefulService
+from underwrite.services.persistence import TypedStoreRepository
+from underwrite.store import StoreBackend
+from underwrite.supervisor import Watcher
+from underwrite.tracer import Tracer
+from underwrite.validate import PayloadValidator
+from underwrite.value_objects import IdGenerator
+
+
+class Handler(StatefulService):
+    """Generates loan document references after approval."""
+
+    def __init__(
+        self,
+        name: str,
+        bus: EventBus | LocalBus,
+        store: StoreBackend,
+        identity: Keypair | None = None,
+        metrics: Collector | None = None,
+        health: Checks | None = None,
+        authz: AccessControl | None = None,
+        tracer: Tracer | None = None,
+        saga: Orchestrator | None = None,
+        supervisor: Watcher | None = None,
+        secrets_manager: Any | None = None,
+        max_concurrent: int = 0,
+    ) -> None:
+        deps = Dependencies(
+            identity=identity,
+            bus=bus,
+            store=store,
+            metrics=metrics,
+            health=health,
+            authz=authz,
+            tracer=tracer,
+            saga=saga,
+            supervisor=supervisor,
+            secrets_manager=secrets_manager,
+            max_concurrent=max_concurrent,
+        )
+        super().__init__(
+            name=name,
+            bus=deps.bus,
+            store=deps.store,
+            metrics=deps.metrics,
+            health=deps.health,
+            authz=deps.authz,
+            tracer=deps.tracer,
+            saga=deps.saga,
+            supervisor=deps.supervisor,
+            secrets_manager=deps.secrets_manager,
+            max_concurrent=deps.max_concurrent,
+        )
+        self.documents: dict[str, list[dict[str, Any]]] = {}
+        self.id_generator: IdGenerator = IdGenerator()
+        self.repo: TypedStoreRepository[dict[str, list[dict[str, Any]]]] = self.store_repo("documents", dict)
+
+    def start(self) -> None:
+        """Load persisted document records when the service starts."""
+        super().start()
+        loaded = self.repo.load(default={})
+        if loaded:
+            self.documents = loaded
+
+    def handle(self, event: Message) -> None:
+        """Generate a document record on underwriter approval.
+
+        Args:
+            event: The incoming domain event.
+        """
+        if event.event_type != Type.UNDERWRITER_APPROVED:
+            return
+        p = event.payload
+        borrower: str = PayloadValidator().non_empty(p, "borrower")
+        principal: float = PayloadValidator().finite(p, "principal")
+        doc_id: str = self.id_generator.next()
+
+        record = {
+            "doc_id": doc_id,
+            "borrower": borrower,
+            "principal": principal,
+            "status": "generated",
+        }
+        with self.state_lock:
+            self.documents.setdefault(borrower, []).append(record)
+            self.repo.save(self.documents)
+
+        self.emit(
+            Type.DOCUMENT_GENERATED,
+            {
+                "borrower": borrower,
+                "principal": principal,
+                "doc_id": doc_id,
+            },
+            correlation_id=event.correlation_id,
+        )
+
+    def documents_for(self, borrower: str) -> list[dict[str, Any]]:
+        """Retrieve all documents generated for a borrower.
+
+        Args:
+            borrower: The borrower identifier.
+
+        Returns:
+            List of document records for the borrower.
+        """
+        with self.state_lock:
+            return list(self.documents.get(borrower, []))

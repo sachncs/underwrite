@@ -1,0 +1,236 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sachin
+
+"""Fraud detection - velocity checks, wash lending, and rule-based alerts."""
+
+from __future__ import annotations
+
+from collections import deque
+from datetime import datetime, timezone
+from typing import Any
+
+from underwrite.authz import AccessControl
+from underwrite.bus import EventBus
+from underwrite.health import Checks
+from underwrite.keypair import Keypair
+from underwrite.local import LocalBus
+from underwrite.message import Message, Type
+from underwrite.metrics import Collector
+from underwrite.saga import Orchestrator
+from underwrite.services.base import Dependencies, StatefulService
+from underwrite.services.persistence import BatchedStoreRepository
+from underwrite.store import StoreBackend
+from underwrite.supervisor import Watcher
+from underwrite.tracer import Tracer
+from underwrite.validate import PayloadValidator
+
+
+class Handler(StatefulService):
+    """Detects wash lending, burst origination patterns, and configurable fraud rules."""
+
+    MAX_BORROWERS: int = 100000
+    SYNC_INTERVAL: int = 10
+    LARGE_PRINCIPAL_THRESHOLD: float = 1_000_000.0
+    ACTIVITY_DEQUE_MAXLEN: int = 1000
+    WASH_SCORE_PER_CYCLE: float = 16.67
+    MAX_FRAUD_SCORE: float = 100.0
+
+    def __init__(
+        self,
+        name: str,
+        bus: EventBus | LocalBus,
+        store: StoreBackend,
+        identity: Keypair | None = None,
+        metrics: Collector | None = None,
+        health: Checks | None = None,
+        authz: AccessControl | None = None,
+        tracer: Tracer | None = None,
+        saga: Orchestrator | None = None,
+        supervisor: Watcher | None = None,
+        secrets_manager: Any | None = None,
+        max_concurrent: int = 0,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize the fraud service with an empty activity record store.
+
+        Args:
+            **kwargs: Forwarded to Core.__init__.
+        """
+        deps = Dependencies(
+            identity=identity,
+            bus=bus,
+            store=store,
+            metrics=metrics,
+            health=health,
+            authz=authz,
+            tracer=tracer,
+            saga=saga,
+            supervisor=supervisor,
+            secrets_manager=secrets_manager,
+            max_concurrent=max_concurrent,
+        )
+        super().__init__(
+            name=name,
+            bus=deps.bus,
+            store=deps.store,
+            metrics=deps.metrics,
+            health=deps.health,
+            authz=deps.authz,
+            tracer=deps.tracer,
+            saga=deps.saga,
+            supervisor=deps.supervisor,
+            secrets_manager=deps.secrets_manager,
+            max_concurrent=deps.max_concurrent,
+        )
+        self.records_storage: dict[str, deque[dict[str, Any]]] = {}
+        self.repo: BatchedStoreRepository[dict[str, list[dict[str, Any]]]] = self.batched_repo(
+            "records", dict, sync_interval=self.SYNC_INTERVAL
+        )
+
+    def start(self) -> None:
+        """Load persisted fraud records when the service starts."""
+        super().start()
+        loaded = self.repo.load(default={})
+        if loaded:
+            self.records_storage = self.deserialize_records(loaded)
+
+    @property
+    def records(self) -> dict[str, deque[dict[str, Any]]]:
+        """Return a snapshot of the internal records dict (test-accessible hook).
+
+        Returns:
+            Dict mapping borrower IDs to their activity deques.
+        """
+        with self.state_lock:
+            return {k: deque(v, maxlen=v.maxlen) for k, v in self.records_storage.items()}
+
+    def handle(self, event: Message) -> None:
+        """Check loan origination and repayment events against fraud rules.
+
+        Triggers alerts for wash lending cycles, velocity bursts, and
+        large-value originations.
+
+        Args:
+            event: The incoming event. LOAN_ORIGINATED and REPAID are processed.
+        """
+        if event.event_type == Type.LOAN_ORIGINATED:
+            borrower: str = PayloadValidator().non_empty(event.payload, "borrower")
+            principal: float = PayloadValidator().finite(event.payload, "principal")
+            with self.state_lock:
+                self.record(borrower, "origination", principal)
+                self.check_wash(borrower, event.correlation_id)
+                self.check_burst_velocity(borrower, event.correlation_id)
+            if principal > self.LARGE_PRINCIPAL_THRESHOLD:
+                self.emit(
+                    Type.FRAUD_ALERT,
+                    {
+                        "rule": "large_origination",
+                        "borrower": borrower,
+                        "principal": principal,
+                    },
+                    correlation_id=event.correlation_id,
+                )
+        elif event.event_type == Type.REPAID:
+            user: str = PayloadValidator().non_empty(event.payload, "user")
+            delta: float = PayloadValidator().finite(event.payload, "delta_earned")
+            with self.state_lock:
+                self.record(user, "repayment", delta)
+                self.check_wash(user, event.correlation_id)
+
+    def record(self, borrower: str, event_type: str, amount: float) -> None:
+        """Record an activity event for a borrower.
+
+        Args:
+            borrower: The borrower identifier.
+            event_type: Type of event (origination or repayment).
+            amount: Transaction amount.
+        """
+        if borrower not in self.records_storage:
+            if len(self.records_storage) >= self.MAX_BORROWERS:
+                self.records_storage.pop(next(iter(self.records_storage)))
+            self.records_storage[borrower] = deque(maxlen=self.ACTIVITY_DEQUE_MAXLEN)
+        else:
+            records = self.records_storage.pop(borrower)
+            self.records_storage[borrower] = records
+        records = self.records_storage[borrower]
+        records.append(
+            {
+                "event_type": event_type,
+                "amount": amount,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        self.repo.incr_and_maybe_sync(self.serialize_records())
+
+    def check_wash(self, borrower: str, correlation_id: str) -> None:
+        """Check for wash lending cycles (alternating origination/repayment).
+
+        Args:
+            borrower: The borrower identifier.
+            correlation_id: Correlation ID for tracing.
+        """
+        records = self.records_storage.get(borrower, deque(maxlen=self.ACTIVITY_DEQUE_MAXLEN))
+        if len(records) < 2:
+            return
+        types = {r["event_type"] for r in records}
+        if len(types) < 2:
+            return
+        cycles: int = 0
+        i: int = 0
+        while i < len(records) - 1:
+            if records[i]["event_type"] == "origination" and records[i + 1]["event_type"] == "repayment":
+                cycles += 1
+                i += 2
+            else:
+                i += 1
+        if cycles >= 3:
+            self.emit(
+                Type.WASH_FLAG,
+                {
+                    "borrower": borrower,
+                    "cycles": cycles,
+                    "score": min(self.MAX_FRAUD_SCORE, cycles * self.WASH_SCORE_PER_CYCLE),
+                },
+                correlation_id=correlation_id,
+            )
+
+    def check_burst_velocity(self, borrower: str, correlation_id: str) -> None:
+        """Check for velocity bursts (multiple rapid originations).
+
+        Args:
+            borrower: The borrower identifier.
+            correlation_id: Correlation ID for tracing.
+        """
+        records = self.records_storage.get(borrower, deque(maxlen=self.ACTIVITY_DEQUE_MAXLEN))
+        recent = [r for r in records if r["event_type"] == "origination"]
+        if len(recent) > 3:
+            self.emit(
+                Type.VELOCITY_FLAG,
+                {
+                    "borrower": borrower,
+                    "count": len(recent),
+                },
+                correlation_id=correlation_id,
+            )
+
+    def serialize_records(self) -> dict[str, list[dict[str, Any]]]:
+        """Convert internal records dict to store-friendly dict of lists.
+
+        Returns:
+            Serialized records suitable for storage.
+        """
+        return {k: list(v) for k, v in self.records_storage.items()}
+
+    @staticmethod
+    def deserialize_records(
+        raw: dict[str, list[dict[str, Any]]],
+    ) -> dict[str, deque[dict[str, Any]]]:
+        """Restore internal dict of deques from store-friendly dict of lists.
+
+        Args:
+            raw: Store-friendly dict of lists.
+
+        Returns:
+            Restored dict of deques.
+        """
+        return {k: deque(v, maxlen=Handler.ACTIVITY_DEQUE_MAXLEN) for k, v in raw.items() if isinstance(v, list)}

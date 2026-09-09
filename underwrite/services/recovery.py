@@ -1,0 +1,368 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sachin
+
+"""Recovery workflows — post-default recovery orchestration.
+
+Implements a multi-stage recovery process with store-backed persistence:
+  1. NEGOTIATION — offer is sent (stage recorded)
+  2. PAYMENT_PLAN — tracked when payments arrive
+  3. ESCALATION — flagged if too many offers rejected
+  4. SETTLEMENT — recovery completed or loss recognized
+
+State is persisted via the Sqlite store so in-flight recoveries
+survive service restarts.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import timedelta
+from enum import Enum
+from typing import Any
+
+from underwrite.authz import AccessControl
+from underwrite.bus import EventBus
+from underwrite.health import Checks
+from underwrite.keypair import Keypair
+from underwrite.local import LocalBus
+from underwrite.logger import logger
+from underwrite.message import Message, Type
+from underwrite.metrics import Collector, SystemClock
+from underwrite.saga import Orchestrator
+from underwrite.services.base import Dependencies, StatefulService
+from underwrite.services.persistence import TypedStoreRepository
+from underwrite.store import StoreBackend
+from underwrite.supervisor import Watcher
+from underwrite.tracer import Tracer
+from underwrite.validate import PayloadValidator
+
+DEFAULT_RECOVERY_RATE: float = 0.3
+NEGOTIATION_DAYS: int = 30
+ESCALATION_THRESHOLD: int = 3
+
+
+@dataclass(frozen=True, slots=True)
+class RecoveryConfig:
+    """Typed configuration for Handler.
+
+    Replaces the previous ``kwargs.pop("recovery_rate", ...)`` pattern:
+    callers now pass a RecoveryConfig (or its fields are extracted
+    from kwargs via a constructor that does not mutate the caller's
+    mapping).
+    """
+
+    recovery_rate: float = DEFAULT_RECOVERY_RATE
+    negotiation_days: int = NEGOTIATION_DAYS
+    escalation_threshold: int = ESCALATION_THRESHOLD
+
+
+class RecoveryStage(str, Enum):
+    """Stages of the recovery workflow."""
+
+    NEGOTIATION = "negotiation"
+    PAYMENT_PLAN = "payment_plan"
+    ESCALATION = "escalation"
+    SETTLEMENT = "settlement"
+
+
+class Handler(StatefulService):
+    """Orchestrates multi-stage recovery after a default event.
+
+    State is persisted to the store so in-flight recoveries survive
+    restarts.  Reacts to DEFAULT_OCCURRED, PAYMENT_RECEIVED, and
+    offer response events to drive recovery forward.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        bus: EventBus | LocalBus,
+        store: StoreBackend,
+        identity: Keypair | None = None,
+        metrics: Collector | None = None,
+        health: Checks | None = None,
+        authz: AccessControl | None = None,
+        tracer: Tracer | None = None,
+        saga: Orchestrator | None = None,
+        supervisor: Watcher | None = None,
+        secrets_manager: Any | None = None,
+        max_concurrent: int = 0,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize the recovery service.
+
+        Args:
+            recovery_rate: Fraction of principal offered in recovery.
+            negotiation_days: Days allowed for negotiation.
+            escalation_threshold: Number of rejected offers before escalation.
+        """
+        config = RecoveryConfig(
+            recovery_rate=kwargs.pop("recovery_rate", DEFAULT_RECOVERY_RATE),
+            negotiation_days=kwargs.pop("negotiation_days", NEGOTIATION_DAYS),
+            escalation_threshold=kwargs.pop("escalation_threshold", ESCALATION_THRESHOLD),
+        )
+        self.recovery_rate: float = config.recovery_rate
+        self.negotiation_days: int = config.negotiation_days
+        self.escalation_threshold: int = config.escalation_threshold
+        deps = Dependencies(
+            identity=identity,
+            bus=bus,
+            store=store,
+            metrics=metrics,
+            health=health,
+            authz=authz,
+            tracer=tracer,
+            saga=saga,
+            supervisor=supervisor,
+            secrets_manager=secrets_manager,
+            max_concurrent=max_concurrent,
+        )
+        super().__init__(
+            name=name,
+            bus=deps.bus,
+            store=deps.store,
+            metrics=deps.metrics,
+            health=deps.health,
+            authz=deps.authz,
+            tracer=deps.tracer,
+            saga=deps.saga,
+            supervisor=deps.supervisor,
+            secrets_manager=deps.secrets_manager,
+            max_concurrent=deps.max_concurrent,
+        )
+        self.clock: SystemClock = SystemClock()
+        self.recoveries: dict[str, dict[str, Any]] = {}
+        self.repo: TypedStoreRepository[dict[str, dict[str, Any]]] = self.store_repo("recoveries", dict)
+
+    def start(self) -> None:
+        """Load persisted recovery state when the service starts."""
+        super().start()
+        loaded = self.repo.load(default={})
+        if loaded:
+            self.recoveries = loaded
+            active = sum(1 for r in self.recoveries.values() if r.get("stage") != RecoveryStage.SETTLEMENT.value)
+            if active > 0:
+                logger.info(
+                    "loaded {} active recovery(s) from store",
+                    active,
+                )
+
+    def handle(self, event: Message) -> None:
+        """Process events that drive the recovery workflow.
+
+        Args:
+            event: The incoming domain event.
+        """
+        if event.event_type == Type.DEFAULT_OCCURRED:
+            self.start_recovery(event)
+        elif event.event_type == Type.PAYMENT_RECEIVED:
+            self.on_payment_received(event)
+        elif event.event_type == Type.RECOVERY_OFFER_RESPONSE.value:
+            self.on_offer_response(event)
+
+    def start_recovery(self, event: Message) -> None:
+        """Start a new recovery workflow for a defaulted borrower.
+
+        Args:
+            event: The DEFAULT_OCCURRED event.
+        """
+        borrower: str = PayloadValidator().non_empty(event.payload, "borrower")
+        principal: float = PayloadValidator().finite(event.payload, "principal")
+
+        with self.state_lock:
+            if borrower in self.recoveries:
+                logger.warning("recovery already active for {}, skipping", borrower)
+                return
+
+            recovery: dict[str, Any] = {
+                "borrower": borrower,
+                "principal": principal,
+                "stage": RecoveryStage.NEGOTIATION.value,
+                "started_at": self.clock.iso(),
+                "offer_count": 0,
+                "plan_failures": 0,
+                "recovered": 0.0,
+                "last_action": self.clock.iso(),
+            }
+            self.recoveries[borrower] = recovery
+            self.sync()
+
+        logger.info("recovery started for {} (principal={:.2f})", borrower, principal)
+        self.emit(
+            Type.RECOVERY_STARTED,
+            {
+                "borrower": borrower,
+                "principal": principal,
+                "stage": RecoveryStage.NEGOTIATION.value,
+                "started_at": recovery["started_at"],
+            },
+            correlation_id=event.correlation_id,
+        )
+
+        offer_amount: float = principal * self.recovery_rate
+        with self.state_lock:
+            recovery["offer_count"] += 1
+            recovery["last_action"] = self.clock.iso()
+            self.sync()
+
+        self.emit(
+            Type.RECOVERY_OFFER.value,
+            {
+                "borrower": borrower,
+                "offer_amount": offer_amount,
+                "due_by": (self.clock.utc_now() + timedelta(days=self.negotiation_days)).isoformat(),
+                "stage": RecoveryStage.NEGOTIATION.value,
+            },
+            correlation_id=event.correlation_id,
+        )
+
+    def on_offer_response(self, event: Message) -> None:
+        """Handle a borrower's response to a recovery offer.
+
+        Args:
+            event: The recovery.offer_response event.
+        """
+        borrower: str = PayloadValidator().non_empty(event.payload, "borrower")
+        accepted: bool = event.payload.get("accepted", False)
+
+        with self.state_lock:
+            recovery = self.recoveries.get(borrower)
+            if not recovery:
+                return
+            if recovery["stage"] in (
+                RecoveryStage.ESCALATION.value,
+                RecoveryStage.SETTLEMENT.value,
+            ):
+                return
+
+            if accepted:
+                recovery["stage"] = RecoveryStage.PAYMENT_PLAN.value
+                recovery["last_action"] = self.clock.iso()
+                self.sync()
+                logger.info("recovery offer accepted for {}", borrower)
+                self.emit(
+                    Type.RECOVERY_STARTED,
+                    {
+                        "borrower": borrower,
+                        "principal": recovery["principal"],
+                        "stage": RecoveryStage.PAYMENT_PLAN.value,
+                        "message": "payment plan agreed",
+                    },
+                    correlation_id=event.correlation_id,
+                )
+            else:
+                recovery["offer_count"] += 1
+                if recovery["offer_count"] >= self.escalation_threshold:
+                    recovery["stage"] = RecoveryStage.ESCALATION.value
+                    recovery["last_action"] = self.clock.iso()
+                    self.sync()
+                    logger.warning("recovery escalated for {}", borrower)
+                    self.emit(
+                        Type.RECOVERY_ESCALATED.value,
+                        {
+                            "borrower": borrower,
+                            "principal": recovery["principal"],
+                            "stage": RecoveryStage.ESCALATION.value,
+                        },
+                        correlation_id=event.correlation_id,
+                    )
+                else:
+                    recovery["last_action"] = self.clock.iso()
+                    self.sync()
+                    offer_amount = recovery["principal"] * self.recovery_rate
+                    self.emit(
+                        Type.RECOVERY_OFFER.value,
+                        {
+                            "borrower": borrower,
+                            "offer_amount": offer_amount,
+                            "due_by": (self.clock.utc_now() + timedelta(days=self.negotiation_days)).isoformat(),
+                            "stage": RecoveryStage.NEGOTIATION.value,
+                        },
+                        correlation_id=event.correlation_id,
+                    )
+
+    def on_payment_received(self, event: Message) -> None:
+        """Track a payment received during recovery.
+
+        Args:
+            event: The PAYMENT_RECEIVED event.
+        """
+        borrower: str = PayloadValidator().non_empty(event.payload, "borrower")
+        amount: float = PayloadValidator().finite(event.payload, "amount")
+
+        with self.state_lock:
+            recovery = self.recoveries.get(borrower)
+            if not recovery:
+                return
+            if recovery["stage"] == RecoveryStage.SETTLEMENT.value:
+                return
+
+            recovery["recovered"] += amount
+            recovery["last_action"] = self.clock.iso()
+            outstanding: float = recovery["principal"] - recovery["recovered"]
+
+            if outstanding <= 0:
+                recovery["stage"] = RecoveryStage.SETTLEMENT.value
+                self.sync()
+                logger.info(
+                    "recovery completed for {} (recovered={:.2f})",
+                    borrower,
+                    recovery["recovered"],
+                )
+                self.emit(
+                    Type.RECOVERY_COMPLETED,
+                    {
+                        "borrower": borrower,
+                        "recovered": recovery["recovered"],
+                        "outstanding": 0.0,
+                        "stage": RecoveryStage.SETTLEMENT.value,
+                    },
+                    correlation_id=event.correlation_id,
+                )
+            else:
+                self.sync()
+                logger.info(
+                    "recovery progress for {}: recovered={:.2f} outstanding={:.2f}",
+                    borrower,
+                    recovery["recovered"],
+                    outstanding,
+                )
+                self.emit(
+                    Type.RECOVERY_PROGRESS.value,
+                    {
+                        "borrower": borrower,
+                        "recovered": recovery["recovered"],
+                        "outstanding": outstanding,
+                        "stage": recovery["stage"],
+                    },
+                    correlation_id=event.correlation_id,
+                )
+
+    def get_recovery(self, borrower: str) -> dict[str, Any] | None:
+        """Return the current recovery record for a borrower.
+
+        Args:
+            borrower: The borrower identifier.
+
+        Returns:
+            Recovery dict or None if not found.
+        """
+        with self.state_lock:
+            return self.recoveries.get(borrower)
+
+    def health_check(self) -> dict[str, Any]:
+        """Return health metrics including recovery counts.
+
+        Returns:
+            Dict with base health info plus recovery stats.
+        """
+        base = super().health_check()
+        with self.state_lock:
+            active = sum(1 for r in self.recoveries.values() if r.get("stage") != RecoveryStage.SETTLEMENT.value)
+            base["active_recoveries"] = active
+            base["total_recoveries"] = len(self.recoveries)
+        return base
+
+    def sync(self) -> None:
+        """Persist recoveries to the store."""
+        self.repo.save(self.recoveries)

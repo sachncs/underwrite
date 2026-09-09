@@ -1,0 +1,289 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sachin
+
+"""Append-only audit ledger. Records every domain event for compliance.
+
+All payloads are redacted for PII before storage. The raw event is
+never persisted - only the sanitized record.
+"""
+
+from __future__ import annotations
+
+import json
+from collections import deque
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from underwrite.authz import AccessControl
+from underwrite.bus import EventBus
+from underwrite.health import Checks
+from underwrite.keypair import Keypair
+from underwrite.local import LocalBus
+from underwrite.logger import logger
+from underwrite.message import Message
+from underwrite.metrics import Collector
+from underwrite.pii import PIISanitizer
+from underwrite.saga import Orchestrator
+from underwrite.services.base import Dependencies, StatefulService
+from underwrite.services.persistence import BatchedStoreRepository
+from underwrite.store import StoreBackend
+from underwrite.supervisor import Watcher
+from underwrite.tracer import Tracer
+
+
+class Handler(StatefulService):
+    """Subscribes to all domain events and persists them to an append-only ledger.
+
+    PII fields (aadhaar, pan, ssn, phone, email, etc.) are automatically
+    redacted from the payload before recording. In-memory ledger is
+    capped at *max_ledger* entries. Persistence is batched via
+    BatchedStoreRepository.
+    """
+
+    SYNC_INTERVAL: int = 10
+
+    def __init__(
+        self,
+        name: str,
+        bus: EventBus | LocalBus,
+        store: StoreBackend,
+        max_ledger: int = 100000,
+        export_url: str = "",
+        identity: Keypair | None = None,
+        metrics: Collector | None = None,
+        health: Checks | None = None,
+        authz: AccessControl | None = None,
+        tracer: Tracer | None = None,
+        saga: Orchestrator | None = None,
+        supervisor: Watcher | None = None,
+        secrets_manager: Any | None = None,
+        max_concurrent: int = 0,
+    ) -> None:
+        """Initialize the audit service with a bounded in-memory ledger.
+
+        Args:
+            name: Unique name for this service instance.
+            bus: Message bus for pub/sub.
+            store: State persistence backend.
+            max_ledger: Maximum number of records to keep. Oldest entries
+                are evicted when the ledger exceeds this limit.
+            export_url: Optional URL for exporting the ledger
+                (s3:// or gs://).
+            identity: Ed25519 identity for signing events.
+            metrics: Optional metrics collector.
+            health: Optional health registry.
+            authz: Optional access control.
+            tracer: Optional distributed tracer.
+            saga: Optional saga orchestrator.
+            supervisor: Optional service supervisor.
+            secrets_manager: Optional secrets manager.
+            max_concurrent: Max concurrent handler threads (0=sync).
+
+        """
+        deps = Dependencies(
+            identity=identity,
+            bus=bus,
+            store=store,
+            metrics=metrics,
+            health=health,
+            authz=authz,
+            tracer=tracer,
+            saga=saga,
+            supervisor=supervisor,
+            secrets_manager=secrets_manager,
+            max_concurrent=max_concurrent,
+        )
+        super().__init__(
+            name=name,
+            bus=deps.bus,
+            store=deps.store,
+            metrics=deps.metrics,
+            health=deps.health,
+            authz=deps.authz,
+            tracer=deps.tracer,
+            saga=deps.saga,
+            supervisor=deps.supervisor,
+            secrets_manager=deps.secrets_manager,
+            max_concurrent=deps.max_concurrent,
+        )
+        self.max_ledger: int = max_ledger
+        self.records: deque = deque(maxlen=max_ledger)
+        self.event_index: dict[str, list[dict[str, Any]]] = {}
+        self.export_url: str = export_url
+        self.repo: BatchedStoreRepository[list[dict[str, Any]]] = self.batched_repo(
+            "ledger", list, sync_interval=self.SYNC_INTERVAL
+        )
+
+    def start(self) -> None:
+        """Start the service and load persisted ledger state.
+
+        Heavy I/O is deferred from __init__ to start() so that
+        constructing the service does not require a reachable store.
+        """
+        super().start()
+        loaded = self.repo.load(default=[])
+        if loaded:
+            self.records.extend(loaded)
+            for r in loaded:
+                et = r.get("event_type")
+                if et:
+                    self.event_index.setdefault(et, []).append(r)
+
+    def handle(self, event: Message) -> None:
+        """Record a redacted version of event to the audit ledger.
+
+        Args:
+            event: The domain event to record. PII fields are redacted
+                before storage.
+
+        """
+        with self.state_lock:
+            record: dict[str, Any] = {
+                "seq": len(self.records) + 1,
+                "event_type": event.event_type,
+                "source": event.source,
+                "payload": PIISanitizer().sanitize(dict(event.payload)),
+                "correlation_id": event.correlation_id,
+                "recorded_at": datetime.now(timezone.utc).isoformat(),
+            }
+            self.records.append(record)
+            self.event_index.setdefault(record["event_type"], []).append(record)
+            if len(self.event_index) > self.max_ledger * 2:
+                excess = len(self.event_index) - self.max_ledger
+                for _ in range(excess):
+                    try:
+                        self.event_index.pop(next(iter(self.event_index)))
+                    except StopIteration:
+                        break
+            self.repo.incr_and_maybe_sync(list(self.records))
+
+    @property
+    def ledger(self) -> list[dict[str, Any]]:
+        """Return a snapshot of all audit records."""
+        with self.state_lock:
+            return list(self.records)
+
+    def events_by_type(self, event_type: str) -> list[dict[str, Any]]:
+        """Return all audit records matching a given event type.
+
+        Args:
+            event_type: The event type string to filter by.
+
+        Returns:
+            List of audit records with matching event_type.
+
+        """
+        with self.state_lock:
+            return list(self.event_index.get(event_type, []))
+
+    def export(self) -> None:
+        """Export the audit ledger to the configured export_url.
+
+        Supports s3://bucket/path (requires boto3) and
+        gs://bucket/path (requires google-cloud-storage).
+        No-op if export_url is not set.
+        """
+        if not self.export_url:
+            return
+        lines: list[str] = [json.dumps(r, sort_keys=True) for r in self.records]
+        body: str = "\n".join(lines) + "\n"
+
+        if self.export_url.startswith("s3://"):
+            self.export_s3(body)
+        elif self.export_url.startswith("gs://"):
+            self.export_gcs(body)
+        else:
+            logger.warning("unsupported export URL scheme: {}", self.export_url.split("://")[0])
+
+    def export_s3(self, body: str) -> None:
+        """Export audit data to S3.
+
+        Args:
+            body: JSONL-formatted audit data as a string.
+
+        """
+        try:
+            import boto3
+        except ImportError:
+            logger.warning("boto3 not available; install with: pip install underwrite[aws]")
+            return
+        path = self.export_url.removeprefix("s3://")
+        bucket, _, key = path.partition("/")
+        try:
+            client = boto3.client("s3")
+            client.put_object(Bucket=bucket, Key=key, Body=body.encode("utf-8"))
+            logger.info("audit exported to s3://{}/{} ({} bytes)", bucket, key, len(body))
+        except (OSError, ValueError, TypeError):
+            logger.exception("audit S3 export failed")
+
+    def export_gcs(self, body: str) -> None:
+        """Export audit data to GCS.
+
+        Args:
+            body: JSONL-formatted audit data as a string.
+
+        """
+        try:
+            from google.cloud import storage
+        except ImportError:
+            logger.warning("google-cloud-storage not available; install with: pip install google-cloud-storage")
+            return
+        path = self.export_url.removeprefix("gs://")
+        bucket, _, key = path.partition("/")
+        try:
+            client = storage.Client()
+            client.bucket(bucket).blob(key).upload_from_string(body)
+            logger.info("audit exported to gs://{}/{} ({} bytes)", bucket, key, len(body))
+        except (OSError, ValueError, TypeError):
+            logger.exception("audit GCS export failed")
+
+    def save_jsonl(self, path: str, chunk_size: int = 1000) -> None:
+        """Write the audit ledger to a JSONL file, streaming in chunks.
+
+        Args:
+            path: Destination file path.
+            chunk_size: Records per chunk to avoid holding full ledger
+                in memory.
+
+        """
+        with open(path, "w") as fh:
+            batch: list[str] = []
+            for record in self.records:
+                batch.append(json.dumps(record, sort_keys=True))
+                if len(batch) >= chunk_size:
+                    fh.write("\n".join(batch) + "\n")
+                    batch.clear()
+            if batch:
+                fh.write("\n".join(batch) + "\n")
+
+    def load_jsonl(self, path: str) -> None:
+        """Load audit records from a JSONL file, replacing the current ledger.
+
+        Corrupted lines are skipped and logged as warnings.
+
+        Args:
+            path: Source file path. No-op if the file does not exist.
+
+        """
+        self.records.clear()
+        p = Path(path)
+        if not p.exists():
+            return
+        corrupted: int = 0
+        with open(p) as fh:
+            for i, line in enumerate(fh, 1):
+                line = line.strip()
+                if line:
+                    try:
+                        self.records.append(json.loads(line))
+                    except json.JSONDecodeError as exc:
+                        corrupted += 1
+                        logger.warning("corrupted audit line {} in {}: {}", i, path, exc)
+        self.event_index.clear()
+        for r in self.records:
+            et = r.get("event_type")
+            if et:
+                self.event_index.setdefault(et, []).append(r)
+        if corrupted:
+            logger.warning("audit load skipped {} corrupted line(s) from {}", corrupted, path)

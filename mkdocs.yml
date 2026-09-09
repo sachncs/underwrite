@@ -1,0 +1,201 @@
+site_name: Underwrite
+site_description: Underwriting infrastructure for Indian retail lending — programmable, auditable, composable.
+site_url: https://sachncs.github.io/underwrite/
+repo_url: https://github.com/sachncs/underwrite
+repo_name: sachncs/underwrite
+edit_uri: edit/master/docs/
+
+docs_dir: docs
+site_dir: site
+
+exclude_docs: |
+  README.md
+  _refactor_plan.md
+
+theme:
+  name: material
+  language: en
+  favicon: assets/favicon.svg
+  logo: assets/branding/logo-128.png
+  icon:
+    repo: fontawesome/brands/github
+    edit: material/file-edit-outline
+    view: material/eye-outline
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.tracking
+    - navigation.footer
+    - search.highlight
+    - search.share
+    - search.suggest
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.tooltips
+    - toc.follow
+  font:
+    text: Inter
+    code: JetBrains Mono
+  icon:
+    admonition:
+      note: material/note-edit-outline
+      tip: material/lightbulb-on-outline
+      warning: material/alert-outline
+      danger: material/skull-outline
+      info: material/information-outline
+
+extra_css:
+  - assets/extra.css
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/sachncs/underwrite
+      name: GitHub repository
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/underwrite/
+      name: PyPI package
+  generator: false
+
+nav:
+  - Home: index.md
+  - Start:
+    - start/index.md
+    - start/install.md
+    - start/quickstart.md
+    - start/first-service.md
+    - start/event-bus.md
+    - start/custom-nano.md
+    - start/plugins.md
+    - start/indian-lending-example.md
+  - Understand:
+    - understand/index.md
+    - understand/architecture.md
+    - understand/lifecycle.md
+    - understand/compliance.md
+    - understand/security.md
+    - understand/runtime.md
+    - understand/events.md
+    - understand/failure-handling.md
+    - understand/system-design.md
+    - understand/directory-structure.md
+    - understand/design-decisions.md
+    - understand/domain-model.md
+  - Build:
+    - build/index.md
+    - build/services.md
+    - build/configuration.md
+    - build/sagas.md
+    - build/kyc-integrations.md
+    - build/environment-variables.md
+    - build/dependencies.md
+    - build/code-style.md
+    - build/testing.md
+    - build/build.md
+  - Operate:
+    - operate/index.md
+    - operate/observability.md
+    - operate/deployment.md
+    - operate/operations.md
+    - operate/health.md
+    - operate/dlq.md
+    - operate/performance.md
+    - operate/database.md
+    - operate/migrations.md
+    - operate/debugging.md
+    - operate/release-process.md
+    - operate/changelog-guide.md
+    - operate/docker.md
+  - Reference:
+    - reference/index.md
+    - reference/api.md
+    - reference/glossary.md
+    - reference/troubleshooting.md
+    - reference/faq.md
+    - reference/maintenance.md
+  - Project:
+    - project/roadmap.md
+    - project/support.md
+    - project/contributing.md
+    - project/security.md
+    - project/code-of-conduct.md
+    - Decisions:
+      - ADR/001-nano-service-architecture.md
+      - ADR/002-event-driven-communication.md
+      - ADR/003-ed25519-cryptographic-provenance.md
+      - ADR/004-saga-orchestration.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - meta
+  - tables
+  - toc:
+      permalink: true
+      permalink_title: Anchor link to this section
+      toc_depth: 3
+  - pymdownx.betterem
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets:
+      check_paths: false
+      base_path:
+        - docs/start
+        - docs
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+plugins:
+  - search:
+      separator: '[\s\-\.\_]+'
+
+validation:
+  nav:
+    omitted_files: ignore
+    not_found: warn
+  links:
+    not_found: ignore
+    absolute_links: ignore
+    unrecognized_links: ignore
