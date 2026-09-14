@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0a0b" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)" />
+    <meta name="color-scheme" content="dark light" />
+
+    <title>Underwrite — Programmable underwriting infrastructure for India</title>
+    <meta
+      name="description"
+      content="Underwrite is an event-driven nano-service platform for Indian retail lending. RBI Digital Lending Guidelines + DPDPA 2023 aligned. 34 nano-services. Ed25519 cryptographic provenance."
+    />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Underwrite" />
+    <meta property="og:title" content="Underwrite — Programmable underwriting for India" />
+    <meta
+      property="og:description"
+      content="Event-driven nano-service platform for Indian retail lending. RBI + DPDPA aligned. Ed25519 cryptographic provenance."
+    />
+    <meta property="og:image" content="./og-image.svg" />
+    <meta property="og:url" content="https://sachncs.github.io/underwrite/" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Underwrite — Programmable underwriting for India" />
+    <meta
+      name="twitter:description"
+      content="Event-driven nano-service platform for Indian retail lending. RBI + DPDPA aligned. Ed25519 cryptographic provenance."
+    />
+    <meta name="twitter:image" content="./og-image.svg" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+
+    <script>
+      // Inline theme bootstrap to prevent flash
+      (function () {
+        try {
+          var stored = localStorage.getItem("uw-theme");
+          var prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+          var mode = stored || (prefersLight ? "light" : "dark");
+          document.documentElement.classList.toggle("dark", mode === "dark");
+          document.documentElement.dataset.theme = mode;
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
