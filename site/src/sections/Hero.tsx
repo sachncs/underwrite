@@ -1,23 +1,21 @@
 import { useEffect, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 
-const ANNOUNCEMENT_TEXT = "Now shipping v0.9 · RBI Digital Lending Guidelines aligned · DPDPA 2023 ready";
+const ANNOUNCEMENT = "v0.9 · RBI Digital Lending aligned · DPDPA 2023 ready";
 
 export function Hero() {
   const reduce = useReducedMotion();
   const [time, setTime] = useState<string>("");
 
   useEffect(() => {
-    const fmt = () => {
-      const d = new Date();
-      return d.toLocaleTimeString("en-IN", {
+    const fmt = () =>
+      new Date().toLocaleTimeString("en-IN", {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
         hour12: false,
         timeZone: "Asia/Kolkata",
       });
-    };
     setTime(fmt());
     const t = setInterval(() => setTime(fmt()), 1000);
     return () => clearInterval(t);
@@ -25,115 +23,106 @@ export function Hero() {
 
   return (
     <section
-      className="relative isolate flex min-h-[100svh] items-center overflow-hidden pt-32 pb-20 sm:pt-40"
+      className="relative isolate flex min-h-[100svh] items-center overflow-hidden pt-28 pb-20 sm:pt-36"
       aria-label="Hero"
     >
-      {/* Background layers */}
+      {/* Background — single refined radial, not layered clutter */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute inset-0 bg-grid mask-radial opacity-60" />
-        <div className="absolute inset-x-0 top-0 h-[640px] bg-gradient-to-b from-[color-mix(in_srgb,var(--bg-elev)_50%,transparent)] to-transparent" />
-        <motion.div
-          aria-hidden="true"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 1.2 }}
-          className="absolute left-1/2 top-[18%] -translate-x-1/2"
-        >
-          <div
-            className="h-[420px] w-[420px] rounded-full opacity-60 blur-[100px]"
-            style={{
-              background:
-                "radial-gradient(circle at center, rgba(59,130,246,0.45) 0%, rgba(59,130,246,0.18) 35%, transparent 65%)",
-            }}
-          />
-        </motion.div>
         <div
-          className="absolute -bottom-32 left-1/2 h-[400px] w-[820px] -translate-x-1/2 opacity-40 blur-[80px]"
+          className="absolute left-1/2 top-[20%] h-[520px] w-[920px] -translate-x-1/2 opacity-70 blur-[120px]"
           style={{
             background:
-              "radial-gradient(ellipse at center, rgba(245,158,11,0.25) 0%, transparent 60%)",
+              "radial-gradient(ellipse at center, rgba(227,168,87,0.18) 0%, rgba(227,168,87,0.05) 45%, transparent 70%)",
+          }}
+        />
+        <div
+          className="absolute inset-x-0 top-0 h-[420px]"
+          style={{
+            background:
+              "linear-gradient(to bottom, color-mix(in srgb, var(--ink-1) 70%, transparent), transparent)",
           }}
         />
       </div>
 
-      <div className="relative mx-auto w-full max-w-[1180px] px-6 sm:px-8">
+      <div className="relative mx-auto w-full max-w-[1240px] px-6 sm:px-10">
         <div className="flex flex-col items-center text-center">
-          {/* Announcement pill */}
+          {/* Announcement */}
           <motion.a
-            href="./docs/start/quickstart/"
+            href="#architecture"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-            className="group inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg-elev)_70%,transparent)] px-1.5 py-1 backdrop-blur-md transition-colors hover:border-[var(--line-strong)]"
+            className="group inline-flex items-center gap-3 rounded-full border border-[var(--line)] bg-[color-mix(in_srgb,var(--ink-1)_70%,transparent)] px-1.5 py-1 backdrop-blur-md transition-colors hover:border-[var(--line-amber)]"
           >
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--bg-soft)] px-2.5 py-1 text-[11px] font-medium text-[var(--fg-mute)]">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ink-2)] px-2.5 py-1 text-[11px] font-medium tracking-[-0.01em] text-[var(--amber)]">
               <span className="relative inline-flex h-1.5 w-1.5">
-                <span className="absolute inset-0 animate-ping rounded-full bg-[#34d399] opacity-60" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#10b981]" />
+                <span className="absolute inset-0 animate-ping rounded-full bg-[var(--amber)] opacity-60" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--amber)]" />
               </span>
-              v0.9
+              New
             </span>
-            <span className="pr-1.5 text-[12.5px] text-[var(--fg-mute)]">
-              {ANNOUNCEMENT_TEXT}
-            </span>
+            <span className="pr-1.5 text-[12.5px] text-[var(--cream-mute)]">{ANNOUNCEMENT}</span>
             <svg
-              width="12"
-              height="12"
+              width="11"
+              height="11"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="mr-1.5 text-[var(--fg-faint)] transition-transform group-hover:translate-x-0.5"
+              className="mr-1.5 text-[var(--cream-faint)] transition-transform group-hover:translate-x-0.5"
               aria-hidden="true"
             >
               <path d="M5 12h14M13 5l7 7-7 7" />
             </svg>
           </motion.a>
 
-          {/* Headline */}
+          {/* Headline — confident, restrained */}
           <motion.h1
             initial={reduce ? false : { opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
-            className="mt-8 max-w-[920px] text-balance text-[40px] font-semibold leading-[1.04] tracking-[-0.035em] text-[var(--fg)] sm:text-[56px] md:text-[68px] lg:text-[78px]"
+            transition={{ duration: 0.9, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
+            className="mt-10 max-w-[1000px] text-balance font-display text-[44px] font-normal leading-[1.02] tracking-[-0.045em] text-[var(--cream)] sm:text-[64px] md:text-[80px] lg:text-[96px]"
           >
-            Programmable underwriting,{" "}
-            <span className="font-serif-display text-[1.05em]">without compromise.</span>
+            Underwriting{" "}
+            <span className="font-serif-display text-[var(--amber)]">infrastructure</span>,
+            <br className="hidden sm:block" />{" "}
+            <span className="text-[var(--cream-mute)]">end to end.</span>
           </motion.h1>
 
-          {/* Sub */}
+          {/* Subheadline */}
           <motion.p
-            initial={reduce ? false : { opacity: 0, y: 18 }}
+            initial={reduce ? false : { opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.16, ease: [0.22, 1, 0.36, 1] }}
-            className="mt-7 max-w-[640px] text-pretty text-[16.5px] leading-relaxed text-[var(--fg-mute)] sm:text-[18px]"
+            transition={{ duration: 0.9, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
+            className="mt-8 max-w-[580px] text-balance text-[16px] leading-[1.6] text-[var(--cream-mute)] sm:text-[17.5px]"
           >
-            An event-driven nano-service platform for Indian retail lending. Thirty-four typed
-            services. Ed25519 cryptographic provenance on every event. RBI and DPDPA, baked in —
-            not bolted on.
+            A typed, event-driven platform for Indian retail lending.
+            <br className="hidden sm:block" />
+            <span className="text-[var(--cream-soft)]">34 services. Ed25519 provenance. RBI and DPDPA, baked in.</span>
           </motion.p>
 
           {/* CTAs */}
           <motion.div
             initial={reduce ? false : { opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.24, ease: [0.22, 1, 0.36, 1] }}
-            className="mt-9 flex flex-col items-center gap-3 sm:flex-row sm:gap-3"
+            transition={{ duration: 0.9, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
+            className="mt-12 flex flex-col items-center gap-3 sm:flex-row"
           >
             <a
               href="#cta"
-              className="group inline-flex items-center justify-center gap-2 rounded-full bg-[var(--fg)] px-6 py-3 text-[14px] font-medium text-[var(--bg)] shadow-[0_1px_0_0_rgba(255,255,255,0.16)_inset,0_18px_42px_-12px_rgba(59,130,246,0.45)] transition-all hover:scale-[1.015] hover:shadow-[0_1px_0_0_rgba(255,255,255,0.2)_inset,0_22px_48px_-12px_rgba(59,130,246,0.55)] active:scale-100"
+              className="group inline-flex items-center gap-2 rounded-full bg-[var(--cream)] px-6 py-3 text-[14px] font-medium tracking-[-0.005em] text-[var(--ink)] transition-all hover:bg-[#fff] hover:shadow-[0_20px_48px_-12px_rgba(246,242,233,0.25)] active:scale-[0.99]"
             >
-              Start in 60 seconds
+              Install Underwrite
               <svg
-                width="14"
-                height="14"
+                width="13"
+                height="13"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="2.2"
+                strokeWidth="2.4"
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 className="transition-transform group-hover:translate-x-0.5"
@@ -143,70 +132,22 @@ export function Hero() {
               </svg>
             </a>
             <a
-              href="./docs/"
-              className="group inline-flex items-center justify-center gap-2 rounded-full border border-[var(--line-strong)] bg-[color-mix(in_srgb,var(--bg-elev)_60%,transparent)] px-6 py-3 text-[14px] font-medium text-[var(--fg)] backdrop-blur-md transition-colors hover:border-[var(--fg-faint)]"
+              href="#architecture"
+              className="group inline-flex items-center gap-2 rounded-full border border-[var(--line-strong)] bg-transparent px-6 py-3 text-[14px] font-normal tracking-[-0.005em] text-[var(--cream-soft)] transition-all hover:border-[var(--cream-faint)] hover:text-[var(--cream)]"
             >
-              Read the docs
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-[var(--fg-mute)] transition-transform group-hover:translate-x-0.5"
-                aria-hidden="true"
-              >
-                <path d="M5 12h14M13 5l7 7-7 7" />
-              </svg>
+              See it run
             </a>
-          </motion.div>
-
-          {/* Install snippet */}
-          <motion.div
-            initial={reduce ? false : { opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.32, ease: [0.22, 1, 0.36, 1] }}
-            className="mt-12 flex flex-col items-center gap-3 sm:mt-14"
-          >
-            <div className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg-elev)_70%,transparent)] px-4 py-1 text-[11.5px] uppercase tracking-[0.1em] text-[var(--fg-faint)] backdrop-blur-md">
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <polyline points="4 17 10 11 4 5" />
-                <line x1="12" y1="19" x2="20" y2="19" />
-              </svg>
-              One command to run
-            </div>
-            <div className="group relative inline-flex max-w-full items-center gap-3 overflow-hidden rounded-2xl border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg-elev)_85%,transparent)] px-4 py-3 shadow-[inset_0_1px_0_0_var(--line)] backdrop-blur-md">
-              <span className="font-mono text-[12.5px] text-[var(--fg-mute)] sm:text-[13px]">
-                <span className="select-none text-[var(--fg-faint)]">$</span>{" "}
-                <span className="text-[var(--fg)]">underwrite</span>{" "}
-                <span className="text-[var(--fg-mute)]">run mechanism compliance pricing kfs</span>
-              </span>
-              <span aria-hidden="true" className="ml-1 inline-block h-4 w-2 animate-pulse bg-[var(--fg)]" />
-            </div>
           </motion.div>
         </div>
 
-        {/* Telemetry console / dashboard preview */}
+        {/* Hero visual — single refined operations panel */}
         <motion.div
-          initial={reduce ? false : { opacity: 0, y: 36 }}
+          initial={reduce ? false : { opacity: 0, y: 32 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 1, delay: 0.4, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 1.1, delay: 0.45, ease: [0.22, 1, 0.36, 1] }}
           className="relative mx-auto mt-20 max-w-[1080px] sm:mt-24"
         >
-          <DashboardPreview time={time} />
+          <OperationsPanel time={time} />
         </motion.div>
 
         {/* Scroll hint */}
@@ -217,17 +158,17 @@ export function Hero() {
           className="mt-14 flex justify-center sm:mt-16"
         >
           <a
-            href="#live"
-            className="group inline-flex flex-col items-center gap-2 text-[var(--fg-faint)] transition-colors hover:text-[var(--fg-mute)]"
+            href="#platform"
+            className="group inline-flex flex-col items-center gap-2.5 text-[var(--cream-faint)] transition-colors hover:text-[var(--cream-mute)]"
             aria-label="Scroll to explore"
           >
-            <span className="font-mono text-[10.5px] uppercase tracking-[0.2em]">Scroll to explore</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.22em]">Scroll</span>
             <span className="relative inline-flex h-7 w-[18px] items-start justify-center rounded-full border border-[var(--line-strong)]">
               <motion.span
                 aria-hidden="true"
-                animate={{ y: [2, 12, 2] }}
+                animate={{ y: [2, 11, 2] }}
                 transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
-                className="mt-1 inline-block h-1.5 w-[2px] rounded-full bg-[var(--fg-mute)]"
+                className="mt-1 inline-block h-1.5 w-[2px] rounded-full bg-[var(--cream-mute)]"
               />
             </span>
           </a>
@@ -237,195 +178,121 @@ export function Hero() {
   );
 }
 
-function DashboardPreview({ time }: { time: string }) {
+function OperationsPanel({ time }: { time: string }) {
   return (
     <div className="relative">
       <div
         aria-hidden="true"
-        className="absolute -inset-x-12 -inset-y-8 -z-10 rounded-[36px] bg-gradient-to-b from-[color-mix(in_srgb,var(--bg-elev)_60%,transparent)] via-transparent to-transparent opacity-80 blur-2xl"
+        className="absolute -inset-x-20 -inset-y-10 -z-10 rounded-[40px] opacity-80 blur-3xl"
+        style={{
+          background:
+            "radial-gradient(ellipse at center, rgba(227,168,87,0.10) 0%, transparent 60%)",
+        }}
       />
-      <div className="ring-inset-soft overflow-hidden rounded-[24px] border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg-elev)_92%,transparent)] shadow-[0_40px_120px_-40px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.04)_inset] backdrop-blur-xl">
-        {/* Window chrome */}
-        <div className="flex items-center justify-between border-b border-[var(--line)] bg-[color-mix(in_srgb,var(--bg-elev)_50%,transparent)] px-4 py-2.5">
-          <div className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]/80" />
-            <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]/80" />
-            <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]/80" />
+      <div className="ring-inset-soft overflow-hidden rounded-[20px] border border-[var(--line)] bg-[color-mix(in_srgb,var(--ink-1)_92%,transparent)] shadow-[0_50px_120px_-40px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(246,242,233,0.04)] backdrop-blur-xl">
+        {/* Header bar */}
+        <div className="flex items-center justify-between border-b border-[var(--line)] px-5 py-3.5">
+          <div className="flex items-center gap-2.5">
+            <span className="h-2 w-2 rounded-full bg-[var(--ink-4)]" />
+            <span className="font-mono text-[11.5px] tracking-[-0.005em] text-[var(--cream-mute)]">
+              underwriting.ledger
+            </span>
+            <span className="hidden h-1 w-1 rounded-full bg-[var(--cream-faint)] sm:inline-block" />
+            <span className="hidden font-mono text-[11px] text-[var(--cream-faint)] sm:inline">
+                live · IST {time || "—"}
+            </span>
           </div>
-          <div className="hidden items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--bg-soft)] px-3 py-1 font-mono text-[11px] text-[var(--fg-faint)] sm:flex">
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="3" y="11" width="18" height="11" rx="2" />
-              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-            </svg>
-            underwrite.local · /v1/health
-          </div>
-          <div className="flex items-center gap-1.5 text-[11px] text-[var(--fg-faint)]">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#10b981]" />
-            <span>IST {time || "—"}</span>
+          <div className="hidden items-center gap-3 sm:flex">
+            <div className="flex items-center gap-1.5 font-mono text-[10.5px] text-[var(--cream-faint)]">
+              <span className="relative inline-flex h-1.5 w-1.5">
+                <span className="absolute inset-0 animate-ping rounded-full bg-[#9bc985] opacity-60" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#9bc985]" />
+              </span>
+              attested
+            </div>
+            <span className="h-1 w-1 rounded-full bg-[var(--cream-faint)]" />
+            <span className="font-mono text-[10.5px] text-[var(--cream-faint)]">Ed25519</span>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-px bg-[var(--line)] sm:grid-cols-12">
-          {/* Sidebar */}
-          <aside className="hidden border-r border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_85%,transparent)] p-4 sm:col-span-3 sm:block">
-            <div className="mb-3 flex items-center gap-2 px-2 text-[11px] uppercase tracking-[0.1em] text-[var(--fg-faint)]">
-              <span className="h-1 w-1 rounded-full bg-[var(--fg-faint)]" /> Services
+        {/* Body — single column, refined */}
+        <div className="grid grid-cols-1 gap-px bg-[var(--line)] sm:grid-cols-[1.4fr_1fr]">
+          {/* Stream column */}
+          <div className="bg-[color-mix(in_srgb,var(--ink-1)_94%,transparent)] p-6 sm:p-7">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-[var(--cream-faint)]">
+                Event stream
+              </span>
+              <span className="font-mono text-[10.5px] text-[var(--cream-faint)]">
+                last 7 of 1,284
+              </span>
             </div>
-            <ul className="space-y-0.5 text-[12.5px]">
+            <ul className="mt-5 space-y-2.5">
               {[
-                ["mechanism", true],
-                ["compliance", true],
-                ["pricing", true],
-                ["risk", true],
-                ["fraud", true],
-                ["kfs", true],
-                ["consent", true],
-                ["dsr", true],
-                ["audit", true],
-                ["razorpay", false],
-                ["credit_bureau", false],
-              ].map(([name, on]) => (
+                ["12:48:02.104", "loan.application.received", "cmd"],
+                ["12:48:02.318", "kyc.check.requested", "cmd"],
+                ["12:48:03.061", "kyc.verified", "evt"],
+                ["12:48:03.412", "risk.scored", "evt"],
+                ["12:48:04.118", "pricing.computed", "evt"],
+                ["12:48:04.502", "consent.recorded", "evt"],
+                ["12:48:05.421", "loan.originated", "evt"],
+              ].map(([t, ev, kind], i) => (
                 <li
-                  key={name as string}
-                  className="flex items-center justify-between rounded-md px-2 py-1.5 text-[var(--fg-mute)] hover:bg-[var(--bg-soft)]"
+                  key={i}
+                  className="grid grid-cols-[68px_1fr_42px] items-center gap-3 rounded-md border border-[var(--line)] bg-[color-mix(in_srgb,var(--ink-2)_60%,transparent)] px-3 py-2 font-mono text-[11.5px]"
                 >
-                  <span className="flex items-center gap-2">
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full ${on ? "bg-[#10b981]" : "bg-[var(--fg-faint)]"}`}
-                    />
-                    <span className="font-mono">{name as string}</span>
-                  </span>
-                  <span className="font-mono text-[10.5px] text-[var(--fg-faint)]">
-                    {(on ? "live" : "idle") as string}
+                  <span className="text-[var(--cream-faint)]">{t as string}</span>
+                  <span className="text-[var(--cream-soft)]">{ev as string}</span>
+                  <span
+                    className={`text-right text-[10px] uppercase tracking-[0.1em] ${
+                      kind === "cmd" ? "text-[var(--amber)]" : "text-[#9bc985]"
+                    }`}
+                  >
+                    {kind as string}
                   </span>
                 </li>
               ))}
             </ul>
-          </aside>
+          </div>
 
-          {/* Main */}
-          <main className="col-span-12 bg-[color-mix(in_srgb,var(--bg-elev)_90%,transparent)] p-5 sm:col-span-9 sm:p-6">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <Stat label="Events / s" value="1,284" delta="+12.4%" />
-              <Stat label="Loan lifecycle" value="312 ms" delta="p95" />
-              <Stat label="Attested" value="100%" delta="Ed25519" />
-              <Stat label="DLQ depth" value="0" delta="healthy" tone="ok" />
+          {/* Signature column */}
+          <div className="bg-[color-mix(in_srgb,var(--ink-1)_94%,transparent)] p-6 sm:p-7">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-[var(--cream-faint)]">
+                Signed envelope
+              </span>
+              <span className="font-mono text-[10.5px] text-[var(--amber)]">verified</span>
             </div>
-
-            <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
-              <div className="col-span-2 rounded-xl border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_70%,transparent)] p-4">
-                <div className="flex items-center justify-between text-[11.5px] text-[var(--fg-faint)]">
-                  <span>Event throughput</span>
-                  <span className="font-mono">last 60s</span>
-                </div>
-                <ThroughputChart />
-              </div>
-
-              <div className="rounded-xl border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_70%,transparent)] p-4">
-                <div className="flex items-center justify-between text-[11.5px] text-[var(--fg-faint)]">
-                  <span>Recent events</span>
-                  <span className="font-mono">live</span>
-                </div>
-                <ul className="mt-3 space-y-1.5 font-mono text-[11.5px]">
-                  {[
-                    ["12:48:02", "loan.application.received"],
-                    ["12:48:02", "kyc.check.requested"],
-                    ["12:48:03", "risk.scored"],
-                    ["12:48:03", "pricing.computed"],
-                    ["12:48:04", "consent.recorded"],
-                    ["12:48:04", "kfs.generated"],
-                    ["12:48:05", "loan.originated"],
-                  ].map(([t, ev], i) => (
-                    <li key={i as number} className="flex items-center gap-3 whitespace-nowrap">
-                      <span className="text-[var(--fg-faint)]">{t}</span>
-                      <span className="text-[var(--fg-mute)]">{ev}</span>
-                      <span className="ml-auto text-[#10b981]">✓</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-
-            <div className="mt-3 rounded-xl border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_70%,transparent)] p-4 font-mono text-[12px]">
-              <div className="flex items-center justify-between text-[11.5px] text-[var(--fg-faint)]">
-                <span>Audit ledger · last entry</span>
-                <span className="hidden sm:inline">SHA-256: 7f3a…b4e2</span>
-              </div>
-              <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-[11.5px] leading-relaxed text-[var(--fg-mute)]">
+            <pre className="mt-5 overflow-x-auto whitespace-pre font-mono text-[11.5px] leading-[1.7] text-[var(--cream-mute)]">
 {`{
-  "id": "evt_01HZX8R7KQ8V4NQ2T",
+  "id":  "evt_01HZX8R7KQ",
   "type": "loan.originated",
   "service": "mechanism",
-  "ts":   "2026-09-14T07:18:05.421Z",
-  "key":  "ed25519:8c4f…b21a",
-  "sig":  "9e1f5a7d3b…",
-  "data": { "loan_id": "LN-49812", "apr": 0.179, "kfs": "kfs_8c2…" }
+  "ts":  "2026-09-14T07:18:05Z",
+  "key": "ed25519:8c4f…b21a",
+  "sig": "9e1f5a7d3b…7c2a"
 }`}
-              </pre>
+            </pre>
+            <div className="mt-5 grid grid-cols-2 gap-2.5">
+              <Metric n="1,284" label="events / s" />
+              <Metric n="312ms" label="median decision" />
+              <Metric n="100%" label="signed" />
+              <Metric n="0" label="DLQ depth" />
             </div>
-          </main>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function Stat({
-  label,
-  value,
-  delta,
-  tone,
-}: {
-  label: string;
-  value: string;
-  delta: string;
-  tone?: "ok";
-}) {
+function Metric({ n, label }: { n: string; label: string }) {
   return (
-    <div className="rounded-xl border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_70%,transparent)] p-3.5">
-      <div className="text-[10.5px] uppercase tracking-[0.08em] text-[var(--fg-faint)]">{label}</div>
-      <div className="mt-1.5 flex items-baseline justify-between">
-        <span className="font-mono text-[20px] tracking-[-0.01em] text-[var(--fg)]">{value}</span>
-        <span
-          className={`font-mono text-[10.5px] ${
-            tone === "ok" ? "text-[#10b981]" : "text-[var(--fg-mute)]"
-          }`}
-        >
-          {delta}
-        </span>
+    <div className="rounded-md border border-[var(--line)] bg-[color-mix(in_srgb,var(--ink-2)_50%,transparent)] px-3 py-2.5">
+      <div className="font-mono text-[14.5px] tracking-[-0.02em] text-[var(--cream)]">{n}</div>
+      <div className="mt-0.5 font-mono text-[9.5px] uppercase tracking-[0.14em] text-[var(--cream-faint)]">
+        {label}
       </div>
-    </div>
-  );
-}
-
-function ThroughputChart() {
-  // Deterministic sparkline
-  const points = [22, 30, 28, 36, 42, 38, 50, 58, 54, 62, 70, 66, 78, 72, 84, 80, 88, 92, 86, 94, 98, 90, 96, 88, 92, 100];
-  const max = Math.max(...points);
-  const w = 480;
-  const h = 92;
-  const step = w / (points.length - 1);
-  const path = points
-    .map((p, i) => `${i === 0 ? "M" : "L"} ${i * step} ${h - (p / max) * h * 0.9}`)
-    .join(" ");
-  const area = `${path} L ${w} ${h} L 0 ${h} Z`;
-  return (
-    <div className="mt-3">
-      <svg viewBox={`0 0 ${w} ${h}`} className="h-[92px] w-full" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id="tpStroke" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#60a5fa" />
-            <stop offset="100%" stopColor="#3b82f6" />
-          </linearGradient>
-          <linearGradient id="tpFill" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.32" />
-            <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path d={area} fill="url(#tpFill)" />
-        <path d={path} fill="none" stroke="url(#tpStroke)" strokeWidth="1.5" />
-        <circle cx={(points.length - 1) * step} cy={h - (points[points.length - 1] / max) * h * 0.9} r="3" fill="#3b82f6" />
-      </svg>
     </div>
   );
 }

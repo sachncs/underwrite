@@ -1,19 +1,19 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { FadeIn } from "../lib/motion";
 
-const EVENT_NODES = [
-  { id: "loan.application.received", x: 8, y: 50, kind: "command" },
-  { id: "kyc.check.requested", x: 24, y: 22, kind: "command" },
-  { id: "kyc.verified", x: 42, y: 14, kind: "event" },
-  { id: "risk.scored", x: 42, y: 32, kind: "event" },
-  { id: "fraud.alert", x: 42, y: 50, kind: "event" },
-  { id: "pricing.compute", x: 42, y: 68, kind: "command" },
-  { id: "consent.record", x: 42, y: 82, kind: "command" },
-  { id: "consent.recorded", x: 62, y: 68, kind: "event" },
-  { id: "pricing.computed", x: 62, y: 50, kind: "event" },
-  { id: "kfs.generate", x: 62, y: 82, kind: "command" },
-  { id: "kfs.generated", x: 80, y: 76, kind: "event" },
-  { id: "loan.originated", x: 94, y: 60, kind: "event" },
+const NODES = [
+  { id: "loan.application.received", x: 6, y: 52, kind: "cmd" },
+  { id: "kyc.check.requested", x: 22, y: 22, kind: "cmd" },
+  { id: "kyc.verified", x: 42, y: 14, kind: "evt" },
+  { id: "risk.scored", x: 42, y: 34, kind: "evt" },
+  { id: "fraud.alert", x: 42, y: 54, kind: "evt" },
+  { id: "pricing.compute", x: 42, y: 72, kind: "cmd" },
+  { id: "consent.record", x: 42, y: 88, kind: "cmd" },
+  { id: "consent.recorded", x: 62, y: 72, kind: "evt" },
+  { id: "pricing.computed", x: 62, y: 52, kind: "evt" },
+  { id: "kfs.generate", x: 62, y: 86, kind: "cmd" },
+  { id: "kfs.generated", x: 80, y: 78, kind: "evt" },
+  { id: "loan.originated", x: 94, y: 58, kind: "evt" },
 ] as const;
 
 const EDGES: Array<[string, string]> = [
@@ -36,57 +36,64 @@ export function Architecture() {
     <section
       id="architecture"
       aria-labelledby="architecture-title"
-      className="relative overflow-hidden py-28 sm:py-36"
+      className="relative overflow-hidden py-24 sm:py-36"
     >
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 -z-10 bg-grid-fine mask-radial opacity-50"
       />
 
-      <div className="mx-auto w-full max-w-[1180px] px-6 sm:px-8">
+      <div className="mx-auto w-full max-w-[1240px] px-6 sm:px-10">
         <FadeIn>
-          <p className="text-[12.5px] uppercase tracking-[0.12em] text-[var(--fg-faint)]">
-            <span className="mr-2 inline-block h-px w-8 align-middle bg-[var(--line-strong)]" />
-            Architecture
-          </p>
-          <h2
-            id="architecture-title"
-            className="mt-5 max-w-[820px] text-balance text-[32px] font-semibold leading-[1.08] tracking-[-0.025em] text-[var(--fg)] sm:text-[44px] md:text-[52px]"
-          >
-            One event bus.{" "}
-            <span className="font-serif-display">Every concern, isolated.</span>
-          </h2>
-          <p className="mt-5 max-w-[640px] text-[15.5px] leading-relaxed text-[var(--fg-mute)]">
-            Cross-cutting concerns — authz, tracing, metrics, idempotency, sagas, DLQ, circuit
-            breaking — are injected by the runtime. Each service is a small{" "}
-            <span className="font-mono text-[var(--fg-soft)]">Core</span> subclass that emits and
-            consumes typed, Ed25519-signed events on an in-process bus.
-          </p>
-        </FadeIn>
+          <div className="grid grid-cols-1 gap-12 lg:grid-cols-[1fr_1.5fr] lg:gap-16">
+            <div>
+              <div className="flex items-center gap-2.5">
+                <span className="h-px w-8 bg-[var(--amber)]" />
+                <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--amber)]">
+                  Architecture
+                </span>
+              </div>
+              <h2
+                id="architecture-title"
+                className="mt-6 text-balance font-display text-[40px] font-normal leading-[1.02] tracking-[-0.04em] text-[var(--cream)] sm:text-[56px] lg:text-[64px]"
+              >
+                One event bus.
+                <br />
+                <span className="text-[var(--cream-mute)]">Every concern, isolated.</span>
+              </h2>
+              <p className="mt-6 max-w-[420px] text-[15px] leading-[1.65] text-[var(--cream-mute)]">
+                Authz, tracing, metrics, idempotency, sagas, DLQ, and circuit breaking
+                are injected by the runtime. Each service is a small{" "}
+                <span className="font-mono text-[var(--cream-soft)]">Core</span> that emits
+                and consumes typed, Ed25519-signed messages on an in-process bus.
+              </p>
 
-        <FadeIn delay={0.1}>
-          <EventFlow />
-        </FadeIn>
+              <dl className="mt-10 grid grid-cols-2 gap-x-8 gap-y-6 border-t border-[var(--line)] pt-8">
+                <Stat n="34" label="Nano-services" sub="+ 4 KYC provider clients" />
+                <Stat n="132" label="Typed event kinds" sub="Strict envelopes" />
+                <Stat n="<1ms" label="Median dispatch" sub="In-process, async" />
+                <Stat n="100%" label="Signed events" sub="Ed25519, pre-dispatch" />
+              </dl>
+            </div>
 
-        <div className="mt-16 grid grid-cols-1 gap-px overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--line)] md:grid-cols-4">
-          <ArchStat n="34" label="Nano-services wired" sub="+ 4 KYC provider clients" />
-          <ArchStat n="132" label="Typed event kinds" sub="Strict message envelope" />
-          <ArchStat n="<1ms" label="Median dispatch" sub="In-process, async" />
-          <ArchStat n="100%" label="Signed events" sub="Ed25519 · verified pre-dispatch" />
-        </div>
+            <FadeIn delay={0.15}>
+              <EventFlow />
+            </FadeIn>
+          </div>
+        </FadeIn>
       </div>
     </section>
   );
 }
 
-function ArchStat({ n, label, sub }: { n: string; label: string; sub: string }) {
+function Stat({ n, label, sub }: { n: string; label: string; sub: string }) {
   return (
-    <div className="flex flex-col gap-1 bg-[color-mix(in_srgb,var(--bg-elev)_95%,transparent)] p-7">
-      <span className="font-mono text-[40px] font-light tracking-[-0.04em] text-[var(--fg)]">
+    <div>
+      <div className="font-display text-[34px] font-normal leading-none tracking-[-0.04em] text-[var(--cream)] sm:text-[40px]">
         {n}
-      </span>
-      <span className="text-[14px] font-medium text-[var(--fg-soft)]">{label}</span>
-      <span className="text-[12.5px] text-[var(--fg-faint)]">{sub}</span>
+      </div>
+      <div className="mt-2 text-[13.5px] text-[var(--cream-soft)]">{label}</div>
+      <div className="mt-0.5 font-mono text-[11px] tracking-[-0.005em] text-[var(--cream-faint)]">{sub}</div>
     </div>
   );
 }
@@ -94,171 +101,143 @@ function ArchStat({ n, label, sub }: { n: string; label: string; sub: string }) 
 function EventFlow() {
   const reduce = useReducedMotion();
   const W = 1100;
-  const H = 500;
-  const nodePos = (id: string) => EVENT_NODES.find((n) => n.id === id)!;
+  const H = 480;
+  const nodePos = (id: string) => NODES.find((n) => n.id === id)!;
   const xToPx = (x: number) => (x / 100) * W;
   const yToPx = (y: number) => (y / 100) * H;
 
   return (
-    <div className="ring-inset-soft relative mt-14 overflow-hidden rounded-2xl border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg-elev)_80%,transparent)]">
+    <div className="relative">
       <div
         aria-hidden="true"
-        className="absolute inset-0 bg-grid-fine opacity-60"
-        style={{ maskImage: "linear-gradient(to bottom, black, transparent 90%)" }}
+        className="absolute -inset-8 -z-10 rounded-[32px] opacity-60 blur-3xl"
+        style={{
+          background:
+            "radial-gradient(ellipse at center, rgba(227,168,87,0.10) 0%, transparent 60%)",
+        }}
       />
-
-      {/* Top status bar */}
-      <div className="flex items-center justify-between border-b border-[var(--line)] px-5 py-3">
-        <div className="flex items-center gap-3">
-          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--fg-faint)]">
-            event flow
-          </span>
-          <span className="h-1 w-1 rounded-full bg-[var(--fg-faint)]" />
-          <span className="font-mono text-[11px] text-[var(--fg-mute)]">
-            132 kinds · async · verified
-          </span>
-        </div>
-        <div className="hidden items-center gap-3 font-mono text-[11px] text-[var(--fg-faint)] sm:flex">
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-[#60a5fa]" /> command
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-[#34d399]" /> event
-          </span>
-        </div>
-      </div>
-
-      <div className="relative aspect-[11/5] w-full">
-        <svg
-          viewBox={`0 0 ${W} ${H}`}
-          className="absolute inset-0 h-full w-full"
-          role="img"
-          aria-label="Event flow diagram"
-        >
-          <defs>
-            <linearGradient id="edge" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="rgba(96,165,250,0.0)" />
-              <stop offset="20%" stopColor="rgba(96,165,250,0.55)" />
-              <stop offset="80%" stopColor="rgba(52,211,153,0.55)" />
-              <stop offset="100%" stopColor="rgba(52,211,153,0.0)" />
-            </linearGradient>
-            <marker
-              id="arrow"
-              viewBox="0 0 10 10"
-              refX="8"
-              refY="5"
-              markerWidth="6"
-              markerHeight="6"
-              orient="auto-start-reverse"
-            >
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(167, 243, 208, 0.85)" />
-            </marker>
-          </defs>
-
-          {/* Edges */}
-          {EDGES.map(([from, to], i) => {
-            const a = nodePos(from);
-            const b = nodePos(to);
-            const x1 = xToPx(a.x);
-            const y1 = yToPx(a.y);
-            const x2 = xToPx(b.x);
-            const y2 = yToPx(b.y);
-            const cx = (x1 + x2) / 2;
-            const path = `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`;
-            return (
-              <g key={`${from}-${to}`}>
-                <path
-                  d={path}
-                  stroke="url(#edge)"
-                  strokeWidth="1.2"
-                  fill="none"
-                  markerEnd="url(#arrow)"
-                />
-                {!reduce && (
-                  <motion.circle
-                    r="3"
-                    fill="#a7f3d0"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: [0, 0.95, 0] }}
-                    transition={{
-                      duration: 2.4,
-                      delay: i * 0.18,
-                      repeat: Infinity,
-                      repeatDelay: 1.2,
-                      ease: "easeInOut",
-                    }}
-                  >
-                    <animateMotion dur="2.4s" repeatCount="indefinite" begin={`${i * 0.18}s`} path={path} />
-                  </motion.circle>
-                )}
-              </g>
-            );
-          })}
-
-          {/* Nodes */}
-          {EVENT_NODES.map((n, i) => {
-            const cx = xToPx(n.x);
-            const cy = yToPx(n.y);
-            const isCommand = n.kind === "command";
-            return (
-              <motion.g
-                key={n.id}
-                initial={reduce ? false : { opacity: 0, scale: 0.6 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.5, delay: 0.2 + i * 0.04, ease: [0.22, 1, 0.36, 1] }}
-                style={{ transformOrigin: `${cx}px ${cy}px` }}
-              >
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r="6.5"
-                  fill={isCommand ? "#60a5fa" : "#34d399"}
-                  opacity="0.16"
-                />
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r="4"
-                  fill={isCommand ? "#60a5fa" : "#34d399"}
-                  stroke={isCommand ? "#93c5fd" : "#6ee7b7"}
-                  strokeWidth="1.2"
-                />
-                <text
-                  x={cx}
-                  y={cy + 16}
-                  textAnchor="middle"
-                  fontSize="11"
-                  fill="rgba(214, 211, 209, 0.95)"
-                  fontFamily="JetBrains Mono, monospace"
-                  style={{ pointerEvents: "none" }}
-                >
-                  {n.id}
-                </text>
-              </motion.g>
-            );
-          })}
-        </svg>
-      </div>
-
-      <div className="grid grid-cols-2 gap-px border-t border-[var(--line)] bg-[var(--line)] sm:grid-cols-4">
-        {[
-          ["34", "services"],
-          ["132", "events"],
-          ["5min", "replay window"],
-          ["Ed25519", "provenance"],
-        ].map(([n, l]) => (
-          <div
-            key={l as string}
-            className="flex items-baseline gap-2 bg-[color-mix(in_srgb,var(--bg-elev)_90%,transparent)] px-4 py-3"
+      <div className="ring-inset-soft overflow-hidden rounded-[20px] border border-[var(--line)] bg-[color-mix(in_srgb,var(--ink-1)_88%,transparent)]">
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 bg-grid-fine opacity-50"
+        />
+        <div className="relative aspect-[11/4.8] w-full">
+          <svg
+            viewBox={`0 0 ${W} ${H}`}
+            className="absolute inset-0 h-full w-full"
+            role="img"
+            aria-label="Underwriting event flow"
           >
-            <span className="font-mono text-[16px] tracking-[-0.02em] text-[var(--fg)]">
-              {n as string}
-            </span>
-            <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-[var(--fg-faint)]">
-              {l as string}
-            </span>
-          </div>
-        ))}
+            <defs>
+              <linearGradient id="edge" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="rgba(227,168,87,0)" />
+                <stop offset="25%" stopColor="rgba(227,168,87,0.6)" />
+                <stop offset="75%" stopColor="rgba(246,242,233,0.45)" />
+                <stop offset="100%" stopColor="rgba(246,242,233,0)" />
+              </linearGradient>
+              <marker
+                id="arrow"
+                viewBox="0 0 10 10"
+                refX="8"
+                refY="5"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto-start-reverse"
+              >
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(246,242,233,0.7)" />
+              </marker>
+            </defs>
+
+            {/* Edges */}
+            {EDGES.map(([from, to], i) => {
+              const a = nodePos(from);
+              const b = nodePos(to);
+              const x1 = xToPx(a.x);
+              const y1 = yToPx(a.y);
+              const x2 = xToPx(b.x);
+              const y2 = yToPx(b.y);
+              const cx = (x1 + x2) / 2;
+              const path = `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`;
+              return (
+                <g key={`${from}-${to}`}>
+                  <path
+                    d={path}
+                    stroke="url(#edge)"
+                    strokeWidth="1.1"
+                    fill="none"
+                    markerEnd="url(#arrow)"
+                  />
+                  {!reduce && (
+                    <circle r="2.5" fill="#e3a857">
+                      <animateMotion
+                        dur="3s"
+                        repeatCount="indefinite"
+                        begin={`${i * 0.25}s`}
+                        path={path}
+                      />
+                      <animate
+                        attributeName="opacity"
+                        values="0;1;0"
+                        dur="3s"
+                        begin={`${i * 0.25}s`}
+                        repeatCount="indefinite"
+                      />
+                    </circle>
+                  )}
+                </g>
+              );
+            })}
+
+            {/* Nodes */}
+            {NODES.map((n, i) => {
+              const cx = xToPx(n.x);
+              const cy = yToPx(n.y);
+              const isCommand = n.kind === "cmd";
+              return (
+                <motion.g
+                  key={n.id}
+                  initial={reduce ? false : { opacity: 0, scale: 0.5 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.5, delay: 0.2 + i * 0.04, ease: [0.22, 1, 0.36, 1] }}
+                  style={{ transformOrigin: `${cx}px ${cy}px` }}
+                >
+                  <circle cx={cx} cy={cy} r="7" fill={isCommand ? "#e3a857" : "#f6f2e9"} opacity="0.1" />
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r="3.5"
+                    fill={isCommand ? "#e3a857" : "#f6f2e9"}
+                    stroke={isCommand ? "#e3a857" : "#f6f2e9"}
+                    strokeOpacity={isCommand ? "1" : "0.5"}
+                    strokeWidth="1"
+                  />
+                  <text
+                    x={cx}
+                    y={cy + 16}
+                    textAnchor="middle"
+                    fontSize="10.5"
+                    fill="rgba(168, 160, 148, 0.95)"
+                    fontFamily="JetBrains Mono, monospace"
+                    style={{ pointerEvents: "none" }}
+                  >
+                    {n.id}
+                  </text>
+                </motion.g>
+              );
+            })}
+          </svg>
+        </div>
+
+        {/* Bottom legend strip */}
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-[var(--line)] px-5 py-3 font-mono text-[11px] text-[var(--cream-faint)]">
+          <span className="inline-flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--amber)]" /> write
+          </span>
+          <span className="inline-flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--cream)]" /> event
+          </span>
+          <span className="ml-auto tracking-[-0.005em]">132 kinds · async · attested pre-dispatch</span>
+        </div>
       </div>
     </div>
   );

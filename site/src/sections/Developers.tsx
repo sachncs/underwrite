@@ -44,7 +44,7 @@ asyncio.run(originate_loan())
   },
   {
     id: "event",
-    label: "Subscribe to events",
+    label: "Subscribe",
     filename: "app.py",
     code: `from underwrite import bus, Type
 
@@ -81,60 +81,63 @@ export function Developers() {
     <section
       id="developers"
       aria-labelledby="dev-title"
-      className="relative py-28 sm:py-36"
+      className="relative py-24 sm:py-36"
     >
-      <div className="mx-auto w-full max-w-[1180px] px-6 sm:px-8">
-        <div className="grid grid-cols-1 gap-12 lg:grid-cols-12 lg:gap-16">
+      <div className="mx-auto w-full max-w-[1240px] px-6 sm:px-10">
+        <div className="grid grid-cols-1 gap-12 lg:grid-cols-12 lg:gap-14">
           <div className="lg:col-span-5">
             <FadeIn>
-              <p className="text-[12.5px] uppercase tracking-[0.12em] text-[var(--fg-faint)]">
-                <span className="mr-2 inline-block h-px w-8 align-middle bg-[var(--line-strong)]" />
-                Developer experience
-              </p>
+              <div className="flex items-center gap-2.5">
+                <span className="h-px w-8 bg-[var(--amber)]" />
+                <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--amber)]">
+                  Developer experience
+                </span>
+              </div>
               <h2
                 id="dev-title"
-                className="mt-5 text-balance text-[32px] font-semibold leading-[1.08] tracking-[-0.025em] text-[var(--fg)] sm:text-[44px] md:text-[52px]"
+                className="mt-6 text-balance font-display text-[40px] font-normal leading-[1.04] tracking-[-0.04em] text-[var(--cream)] sm:text-[56px] lg:text-[60px]"
               >
-                Small surface.{" "}
-                <span className="font-serif-display">Deep reach.</span>
+                Small surface.
+                <br />
+                <span className="text-[var(--cream-mute)]">Deep reach.</span>
               </h2>
-              <p className="mt-5 text-[15.5px] leading-relaxed text-[var(--fg-mute)]">
+              <p className="mt-6 text-[15px] leading-[1.65] text-[var(--cream-mute)]">
                 One base class. One event bus. One envelope. The whole platform is reachable
                 through a typed, discoverable Python API — and observable end-to-end through
                 OTLP and Prometheus.
               </p>
-              <ul className="mt-8 space-y-3.5">
+              <ul className="mt-8 flex flex-col gap-3.5">
                 {[
                   "Python ≥ 3.10, fully typed (mypy strict)",
                   "One CLI: init, run, list, identity, health, dlq, metrics, migrate, serve",
-                  "FastAPI daemon at /v1/{publish,health,metrics}",
+                  "FastAPI daemon at /v1/{publish, health, metrics}",
                   "OTLP tracing + Prometheus metrics out of the box",
                 ].map((line) => (
                   <li
                     key={line}
-                    className="flex items-start gap-3 text-[14.5px] text-[var(--fg-soft)]"
+                    className="flex items-start gap-3 text-[13.5px] text-[var(--cream-soft)]"
                   >
-                    <span className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--signal-500)]" />
+                    <span className="mt-2 inline-block h-1 w-1 shrink-0 rounded-full bg-[var(--amber)]" />
                     {line}
                   </li>
                 ))}
               </ul>
-              <div className="mt-8 flex flex-wrap gap-2">
+              <div className="mt-10 flex flex-wrap gap-2">
                 <a
                   href="./docs/start/install/"
-                  className="inline-flex items-center gap-1.5 rounded-full bg-[var(--fg)] px-4 py-2 text-[13px] font-medium text-[var(--bg)]"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line-strong)] bg-transparent px-4 py-2 text-[13px] font-normal tracking-[-0.005em] text-[var(--cream-soft)] transition-colors hover:border-[var(--cream-faint)] hover:text-[var(--cream)]"
                 >
                   Install guide
                 </a>
                 <a
                   href="./docs/start/quickstart/"
-                  className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line-strong)] px-4 py-2 text-[13px] font-medium text-[var(--fg)] hover:border-[var(--fg-faint)]"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line-strong)] bg-transparent px-4 py-2 text-[13px] font-normal tracking-[-0.005em] text-[var(--cream-soft)] transition-colors hover:border-[var(--cream-faint)] hover:text-[var(--cream)]"
                 >
                   Quickstart
                 </a>
                 <a
                   href="./docs/reference/api/"
-                  className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line-strong)] px-4 py-2 text-[13px] font-medium text-[var(--fg)] hover:border-[var(--fg-faint)]"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line-strong)] bg-transparent px-4 py-2 text-[13px] font-normal tracking-[-0.005em] text-[var(--cream-soft)] transition-colors hover:border-[var(--cream-faint)] hover:text-[var(--cream)]"
                 >
                   API reference
                 </a>
@@ -162,38 +165,34 @@ function CodeCard({
 }) {
   const active = tab.id;
   return (
-    <div className="ring-inset-soft overflow-hidden rounded-2xl border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg-elev)_90%,transparent)] shadow-[0_40px_100px_-40px_rgba(0,0,0,0.6)]">
-      <div className="flex items-center justify-between border-b border-[var(--line)] bg-[color-mix(in_srgb,var(--bg-elev)_60%,transparent)] px-3 py-2.5 sm:px-4">
-        <div className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]/80" />
-          <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]/80" />
-          <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]/80" />
-        </div>
-        <span className="hidden font-mono text-[11px] text-[var(--fg-faint)] sm:inline">
+    <div className="ring-inset-soft overflow-hidden rounded-[18px] border border-[var(--line)] bg-[color-mix(in_srgb,var(--ink-1)_92%,transparent)] shadow-[0_50px_120px_-40px_rgba(0,0,0,0.6)]">
+      <div className="flex items-center justify-between border-b border-[var(--line)] px-4 py-3">
+        <div className="flex items-center gap-2 font-mono text-[11.5px] tracking-[-0.005em] text-[var(--cream-mute)]">
+          <span className="h-1.5 w-1.5 rounded-full bg-[var(--ink-4)]" />
           {tab.filename}
-        </span>
-        <div className="flex items-center gap-2 text-[11px] text-[var(--fg-faint)]">
-          <span className="hidden sm:inline">python · typed</span>
         </div>
+        <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-[var(--cream-faint)]">
+          python · typed
+        </span>
       </div>
 
-      <div className="flex gap-1 overflow-x-auto border-b border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_50%,transparent)] px-2 py-2 no-scrollbar">
+      <div className="flex gap-1 overflow-x-auto border-b border-[var(--line)] px-2 py-2 no-scrollbar">
         {TABS.map((t) => (
           <button
             key={t.id}
             type="button"
             onClick={() => setActive(t.id)}
-            className={`relative whitespace-nowrap rounded-md px-3 py-1.5 text-[12.5px] font-medium transition-colors ${
+            className={`relative whitespace-nowrap rounded-md px-3 py-1.5 text-[12.5px] font-normal tracking-[-0.005em] transition-colors ${
               active === t.id
-                ? "text-[var(--fg)]"
-                : "text-[var(--fg-faint)] hover:text-[var(--fg-mute)]"
+                ? "text-[var(--cream)]"
+                : "text-[var(--cream-faint)] hover:text-[var(--cream-mute)]"
             }`}
           >
             {t.label}
             {active === t.id && (
               <motion.span
                 layoutId="dev-tab-bg"
-                className="absolute inset-0 -z-10 rounded-md bg-[color-mix(in_srgb,var(--bg-soft)_85%,transparent)] ring-1 ring-[var(--line)]"
+                className="absolute inset-0 -z-10 rounded-md bg-[color-mix(in_srgb,var(--ink-3)_90%,transparent)]"
                 transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
               />
             )}
@@ -201,8 +200,8 @@ function CodeCard({
         ))}
       </div>
 
-      <div className="grid grid-cols-[auto_1fr] gap-x-4 p-4 font-mono text-[12.5px] leading-relaxed sm:p-6 sm:text-[13px]">
-        <div className="select-none text-right text-[var(--fg-faint)]">
+      <div className="grid grid-cols-[auto_1fr] gap-x-4 p-5 font-mono text-[12.5px] leading-[1.7] sm:p-7 sm:text-[13px]">
+        <div className="select-none text-right text-[var(--cream-faint)]">
           {tab.code.split("\n").map((_, i) => (
             <div key={i}>{String(i + 1).padStart(2, "0")}</div>
           ))}
@@ -214,7 +213,7 @@ function CodeCard({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-            className="overflow-x-auto whitespace-pre text-[var(--fg-soft)]"
+            className="overflow-x-auto whitespace-pre text-[var(--cream-soft)]"
           >
             {highlight(tab.code)}
           </motion.pre>
@@ -224,6 +223,7 @@ function CodeCard({
   );
 }
 
+type Tok = { text: string; cls?: string };
 function highlight(code: string): React.ReactNode {
   const lines = code.split("\n");
   return lines.map((line, idx) => {
@@ -241,7 +241,6 @@ function highlight(code: string): React.ReactNode {
   });
 }
 
-type Tok = { text: string; cls?: string };
 function tokenize(line: string): Tok[] {
   const keywords = new Set([
     "from",
@@ -264,13 +263,7 @@ function tokenize(line: string): Tok[] {
     "None",
     "await",
   ]);
-  const types = new Set([
-    "Mechanism",
-    "Core",
-    "Type",
-    "bus",
-    "asyncio",
-  ]);
+  const types = new Set(["Mechanism", "Core", "Type", "bus", "asyncio"]);
   const out: Tok[] = [];
   let i = 0;
   let buf = "";
@@ -284,7 +277,7 @@ function tokenize(line: string): Tok[] {
     const c = line[i];
     if (c === "#") {
       flush();
-      out.push({ text: line.slice(i), cls: "text-[var(--fg-faint)] italic" });
+      out.push({ text: line.slice(i), cls: "text-[var(--cream-faint)] italic" });
       break;
     }
     if (c === '"' || c === "'") {
@@ -292,7 +285,7 @@ function tokenize(line: string): Tok[] {
       const quote = c;
       let j = i + 1;
       while (j < line.length && line[j] !== quote) j++;
-      out.push({ text: line.slice(i, j + 1), cls: "text-[#86efac]" });
+      out.push({ text: line.slice(i, j + 1), cls: "text-[#9bc985]" });
       i = j + 1;
       continue;
     }
@@ -302,10 +295,10 @@ function tokenize(line: string): Tok[] {
       while (j < line.length && /[A-Za-z0-9_]/.test(line[j])) j++;
       const word = line.slice(i, j);
       let cls: string | undefined;
-      if (keywords.has(word)) cls = "text-[#c4b5fd]";
-      else if (types.has(word)) cls = "text-[#fbbf24]";
-      else if (/^[A-Z][A-Z0-9_]+$/.test(word)) cls = "text-[#fda4af]";
-      else if (/^[A-Z]/.test(word)) cls = "text-[#93c5fd]";
+      if (keywords.has(word)) cls = "text-[#c5b9e8]";
+      else if (types.has(word)) cls = "text-[var(--amber)]";
+      else if (/^[A-Z][A-Z0-9_]+$/.test(word)) cls = "text-[#e6a89a]";
+      else if (/^[A-Z]/.test(word)) cls = "text-[var(--cream-soft)]";
       out.push({ text: word, cls });
       i = j;
       continue;
@@ -314,7 +307,7 @@ function tokenize(line: string): Tok[] {
       flush();
       let j = i;
       while (j < line.length && /[0-9._]/.test(line[j])) j++;
-      out.push({ text: line.slice(i, j), cls: "text-[#fcd34d]" });
+      out.push({ text: line.slice(i, j), cls: "text-[#dcd2b8]" });
       i = j;
       continue;
     }
