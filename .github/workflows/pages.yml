@@ -1,4 +1,5 @@
-name: Build and deploy MkDocs site
+name: Build and deploy site
+
 on:
   push:
     branches: [master]
@@ -19,23 +20,53 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install mkdocs and Material
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: "site/pnpm-lock.yaml"
+
+      - name: Install pnpm
+        run: npm install -g pnpm@10
+
+      - name: Install mkdocs
         run: |
           pip install --upgrade pip
           pip install mkdocs mkdocs-material pymdown-extensions
 
-      - name: Build
+      - name: Build MkDocs into site/docs
         run: mkdocs build --strict
+
+      - name: Install site dependencies
+        working-directory: site
+        run: pnpm install --frozen-lockfile
+
+      - name: Build product landing page
+        working-directory: site
+        env:
+          VITE_BASE: /${{ github.event.repository.name }}/
+        run: pnpm run build
+
+      - name: Stage combined artifact
+        run: |
+          mkdir -p .pages
+          cp -r site/dist/. .pages/
+          if [ -d site/docs ]; then
+            mkdir -p .pages/docs
+            cp -r site/docs/. .pages/docs/
+          fi
 
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: .pages
 
   deploy:
     needs: build

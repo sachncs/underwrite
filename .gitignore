@@ -74,4 +74,13 @@ var/
 
 # Agent tooling
 AGENTS.md
-site/
+
+# Site (product landing page) — ignore build output, keep source tracked
+site/dist/
+site/docs/
+site/.vite/
+site/node_modules/
+site/*.tsbuildinfo
+
+# GitHub Pages deploy staging
+.pages/
